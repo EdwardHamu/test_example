@@ -15,6 +15,35 @@
     const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
     if(!document.execCommand('insertText',false,value))throw new Error('未能填入提示词');
   };
+  const completion = log => {
+    const match = /^https:\/\/arena\.ai\/agent\/([0-9a-f-]{36})$/i.exec(location.href);
+    if (!log || !match) return null;
+    try {
+      let fiber = log[Object.keys(log).find(k => k.startsWith('__reactFiber'))];
+      const root = f => { for (let n=0; f?.return && n<150; n++) f=f.return; return f; };
+      let top=root(fiber);
+      if (top?.stateNode?.current && top !== top.stateNode.current) {
+        fiber=fiber?.alternate; top=root(fiber);
+        if (!top || (top.stateNode?.current && top !== top.stateNode.current)) return null;
+      }
+      for (let n=0; fiber && n<100; n++, fiber=fiber.return) {
+        const live=fiber.memoizedProps?.value;
+        if (!live || live.id!==match[1] || !Array.isArray(live.messages)) continue;
+        if (!['ready','submitted','streaming','error'].includes(live.status)) return null;
+        const last=live.messages[live.messages.length-1];
+        const parts=Array.isArray(last?.parts)?last.parts:typeof last?.content==='string'?[{type:'text',text:last.content}]:[];
+        const unfinished=last?.metadata?.pending===true || parts.some(p=>p &&
+          (p.state==='streaming' || ((p.type==='dynamic-tool' || p.type?.startsWith('tool-')) &&
+            !['output-available','output-error','output-denied','result'].includes(p.state))));
+        const answer=last?.role==='assistant' && parts.some(p=>p &&
+          ((p.type==='text' && typeof p.text==='string' && p.text.trim()) ||
+           ((p.type==='dynamic-tool' || p.type?.startsWith('tool-')) && ['output-available','output-error','output-denied','result'].includes(p.state))));
+        return {busy:['submitted','streaming'].includes(live.status)||unfinished,
+          complete:live.status==='ready' && !!answer && !unfinished, failed:live.status==='error'};
+      }
+    } catch (_) { /* Website shape changed: keep conservative DOM detection. */ }
+    return null;
+  };
   const view = prompt => {
     const main = [...document.querySelectorAll('main')].find(visible);
     const log = main && [...main.querySelectorAll('[role="log"]')].find(visible);
@@ -23,6 +52,8 @@
     const challenge = dialogs().some(e=>/Security Verification|人机身份验证/.test(e.innerText));
     const alerts = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(e => e.innerText).join('\n');
     const response = text.replace(prompt, '').trim();
+    const live = completion(log);
+    const stop = !!main && buttons(main).some(e=>label(e)==='Stop generating' && !e.closest('[role="log"]'));
     const blocked = challenge ? '需要人机验证' :
       find('Log In') || (dialog && /Log In to your account|Log In or Create Account/.test(dialog.innerText)) ? '请先登录 Arena' :
       /too many requests|rate limit|try again later|quota exceeded|limit reached/i.test(alerts) ? '网站限流，请稍后继续' :
@@ -30,10 +61,11 @@
     return {
       url: location.href, main: !!main, conversation: !!text, promptConfirmed: !!prompt && text.includes(prompt),
       thinking: !!log && buttons(log).some(e => /^(Thinking\b|Thought\b|思考|已思考)/i.test(label(e))),
-      generating: !!main && !!find('Stop generating', main),
-      failed: /(?:^|\n)(?:Stopped|Generation stopped|Error|Something went wrong)(?:\n|$)/i.test(response),
+      generating: live ? live.busy || (!live.complete && stop) : stop,
+      generationKnown: !!live, responseComplete: !!live?.complete,
+      failed: !!live?.failed || /(?:^|\n)(?:Stopped|Generation stopped|Error|Something went wrong)(?:\n|$)/i.test(response),
       response: response.length > 20 && !/^(finding|waiting|initializ|starting)/i.test(response),
-      responseSignature: response.length + ':' + Array.from(response).slice(-160).join(''),
+      responseSignature: response.length + ':' + Array.from(response.slice(-320)).slice(-160).join(''),
       draft: input()?.innerText.trim() || '', editor: !!input(), blocker: blocked,
       termsPending: !!termsButton() && blocked==='正在处理网站首次使用条款',
       sendReady: !!main && !!find('Send message', main) && !find('Send message', main).disabled,
@@ -58,8 +90,21 @@
       if(!v.main||v.conversation||v.generating||!v.editor||v.draft!==expected)throw new Error('草稿与预期不同，已保留');
       writeDraft(replacement);return {ok:true};
     },
-    action: (name, prompt) => {
+    action: (name, prompt, gacha = false) => {
       const v = view(prompt);
+      if (gacha) {
+        if (name==='new' && v.generating) return {waiting:true};
+        if (v.attachmentNames.length || [...document.querySelectorAll('main [role=progressbar],main .animate-spin')].some(e=>visible(e)&&!e.closest('[role=log]')))
+          throw Error('当前有附件或上传未完成；抽卡不会夹带附件');
+        if (v.draft && (name==='new' || v.draft!==prompt)) throw Error('当前有其他草稿，已保留');
+        if (['new','fill','send','retryFill','retrySend'].includes(name)) {
+          const gate = window.__MODEL_PROBE__?.gachaCooldown;
+          if (typeof gate !== 'function') return {waiting:true, reason:'cooldown-probe-not-ready'};
+          const finished = v.responseComplete || (v.failed && !v.generating);
+          const {remainingMs} = gate(finished);
+          if (remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
+        }
+      }
       if(name==='terms'||name==='dismissTerms') {
         if(name==='terms'&&!v.termsPending)throw new Error('当前不能确认使用条款');
         const dialog=termsDialog();

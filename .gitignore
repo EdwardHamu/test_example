@@ -43,3 +43,8 @@
 *.[dD][lL][lL].[bB][aA][kK]
 
 # JS、HTML、JSON、配置、文档及 PNG/ICO 等界面资源仍可纳入版本控制。
+
+# 本地主程序备份、操作锁与临时恢复目录
+/.binary-backups/
+/.binary-update.lock/
+/.binary-restore-*/

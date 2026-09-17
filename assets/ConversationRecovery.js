@@ -1,10 +1,13 @@
 (() => {
   const key = '__arenaConversationRecovery';
-  if (window[key]) return;
+  const version = 2;
+  if (window[key]?.version === version) return;
   const state = {plan:null};
-  const visible = e => !!e.getClientRects().length;
+  const ready = () => !!document.body && ['interactive','complete'].includes(document.readyState);
+  const visible = e => !!e && !!e.getClientRects().length;
   const draft = () => [...document.querySelectorAll('[contenteditable="true"]')].filter(visible).map(e=>e.innerText).join('\n');
   const context = () => {
+    if (!ready()) return null;
     const log = [...document.querySelectorAll('[role="log"]')].find(visible);
     if (!log) return null;
     let f=log[Object.keys(log).find(k=>k.startsWith('__reactFiber'))], live, initial;
@@ -16,8 +19,9 @@
     return live&&initial?{live,initial}:null;
   };
   const fault = evidence => {
+    if(!ready()) return null;
     if(location.origin!=='https://arena.ai'||!/^\/agent\/[0-9a-f-]{36}$/.test(location.pathname)) return null;
-    const text=evidence||document.body.innerText;
+    const text=evidence||document.body?.innerText||'';
     const m=/Assistant node "([0-9a-f-]{36})" not found in session "([0-9a-f-]{36})"/i.exec(text);
     if(!m||location.pathname!=='/agent/'+m[2])return null;
     if([...document.querySelectorAll('[role="dialog"]')].filter(visible).some(e=>/Security Verification|人机|Log In|使用条款/.test(e.innerText)))return null;
@@ -32,15 +36,17 @@
     return {c,nodeId:last.id,sessionId:m[2],evidence:m[0]};
   };
   window[key]={
+    version,
     prepare(evidence) {
+      state.plan=null;
       const v=fault(evidence);if(!v)return {eligible:false};
       const {live,initial}=v.c;
       const token=crypto.randomUUID(), snapshot=JSON.stringify(live.messages), initialSnapshot=JSON.stringify(initial), savedDraft=draft();
-      state.plan={token,nodeId:v.nodeId,evidence:v.evidence,url:location.href,snapshot,initialSnapshot,draft:savedDraft};
+      state.plan={token,body:document.body,nodeId:v.nodeId,evidence:v.evidence,url:location.href,snapshot,initialSnapshot,draft:savedDraft};
       return {eligible:true,token,nodeId:v.nodeId,url:location.href,backup:{capturedAt:new Date().toISOString(),url:location.href,evidence:v.evidence,messages:live.messages,initialMessages:initial,draft:savedDraft},text:live.messages.at(-1).parts?.filter(p=>p.type==='text').map(p=>p.text).join('\n')||''};
     },
     apply(token) {
-      const p=state.plan;if(!p||p.token!==token||p.url!==location.href)return {applied:false,reason:'页面已改变'};
+      const p=state.plan;if(!ready()||!p||p.body!==document.body||p.token!==token||p.url!==location.href)return {applied:false,reason:'页面已改变'};
       const v=fault(p.evidence);
       if(!v||JSON.stringify(v.c.live.messages)!==p.snapshot||JSON.stringify(v.c.initial)!==p.initialSnapshot||draft()!==p.draft)return {applied:false,reason:'消息或草稿已改变'};
       // Remove only the confirmed orphan; preserve all other live metadata and the draft controller.
@@ -49,7 +55,7 @@
     },
     verify(token) {
       const p=state.plan,c=context();
-      return {repaired:!!p&&p.token===token&&p.url===location.href&&!!c&&!c.live.messages.some(m=>m.id===p.nodeId)};
+      return {repaired:ready()&&!!p&&p.body===document.body&&p.token===token&&p.url===location.href&&!!c&&!c.live.messages.some(m=>m.id===p.nodeId)};
     }
   };
 })();

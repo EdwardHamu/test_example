@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.1+reasoning-migration — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.3+gacha-cooldown — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -432,7 +432,7 @@ function ingestNative(event = {}) {
   if (!key) return { ok: false, reason: 'missing-request-id' };
   if (event.kind === 'request') {
     if (event.method !== 'POST') return { ok: true };
-    beginTurn(event.url); BUS.diagnostics.requests++;
+    beginTurn(event.url); BUS.nativeLastEnd = null; BUS.diagnostics.requests++;
     // Older open out streams are carried forward, but completed responses are not replayed.
     for (const tap of taps.values()) { tap.generation = BUS.generation; tap.meaningful = false; tap.observationIndex = -1; tap.text = ''; tap.frames = []; tap.ttft = 0; tap.t0 = performance.now(); }
     let obj;
@@ -459,13 +459,19 @@ function ingestNative(event = {}) {
     // A short answer must update even if no more stream events arrive.
     tap.publish(false);
   }
-  if (event.kind === 'end') { tap.finish(); taps.delete(key); }
+  if (event.kind === 'end') {
+    const networkEnd = ['finished','canceled','failed'].includes(event.termination) ? event.termination : 'unknown';
+    const termination = event.truncated ? 'truncated' : event.captureFailed ? 'incomplete' : networkEnd;
+    tap.finish(termination);
+    BUS.nativeLastEnd = { termination, networkEnd, truncated: !!event.truncated, captureFailed: !!event.captureFailed };
+    taps.delete(key);
+  }
   return { ok: true };
 }
 function nativeStatus() {
   return { ...(BUS.nativeStats || {connected:false}),
     connected: !!BUS.nativeStats?.connected && Date.now() - (BUS.nativeLastSeen || 0) < 15000,
-    openStreams: taps.size };
+    lastEnd: BUS.nativeLastEnd || null, openStreams: taps.size };
 }
 
   exp.ingestNative = ingestNative;
@@ -1316,6 +1322,10 @@ const BUS = {
   },
 };
 
+function auditParserEvent(id, kind, count) {
+  try { globalThis.__coverageAudit?.parserEvent?.(id, kind, count); } catch { /* Diagnostics must not interrupt capture. */ }
+}
+
 const now = () => performance.now();
 function nativeActive() { return BUS.captureMode === 'cdp' && Date.now() - (BUS.nativeLastSeen || 0) < 15000; }
 function beginTurn(url = '') {
@@ -1446,7 +1456,7 @@ class SSETap {
     }
     this.chunks++;
     this.text += s;
-    if (this.text.length > 400000) this.text = this.text.slice(-200000);
+    if (this.text.length > 400000) {auditParserEvent(this.ctx.nativeId,'text-retention-trim',this.text.length-200000);this.text = this.text.slice(-200000);}
 
     this.buf += s;
     const lines = this.buf.split('\n');
@@ -1477,7 +1487,7 @@ class SSETap {
     if (payload === '[DONE]') { this.publish(true); return; }
 
     let obj = null;
-    try { obj = JSON.parse(payload); } catch { /* 非 JSON，交给正则兜底 */ }
+    try { obj = JSON.parse(payload); } catch { auditParserEvent(this.ctx.nativeId,'outer-json-fallback',1); }
 
     if (obj) {
       // ---- arena.ai realtime batch：records[].body 是「JSON 字符串里再套 JSON」----
@@ -1495,7 +1505,7 @@ class SSETap {
           }
           if (typeof rec.body !== 'string') continue;
           let inner = null;
-          try { inner = JSON.parse(rec.body); } catch { continue; }
+          try { inner = JSON.parse(rec.body); } catch { auditParserEvent(this.ctx.nativeId,'record-body-json-error',1);continue; }
           this.consumeFrame(inner, `seq${rec.seq_num}`);
         }
       }
@@ -1586,11 +1596,12 @@ class SSETap {
     if (r != null) this.reasoningTokens = r;
   }
 
-  finish() {
+  finish(termination = 'finished') {
     if (this.done) return;
     this.done = true;
     if (this.buf) this.handleLine(this.buf.trim());
-    this.publish(true);
+    this.termination = termination;
+    this.publish(termination === 'finished');
   }
 
   publish(complete = false) {
@@ -1607,6 +1618,7 @@ class SSETap {
       totalMs: Math.round(now() - this.t0),
       chunks: this.chunks,
       complete,
+      transportEnd: this.termination || null,
       text: this.text.replace(/eyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[REDACTED_JWT]'),
       frames: this.frames || [],
       events: this.events || [],
@@ -1695,13 +1707,14 @@ function installFetchHook() {
             const b = res.clone().body;
             (async () => {
               const reader = b.getReader();
+              let termination = 'finished';
               try {
                 for (;;) {
                   const { done, value } = await reader.read();
                   if (done) break;
                   tap.feed(value);
                 }
-              } catch { /* stream aborted */ } finally { tap.finish(); }
+              } catch (error) { termination = error?.name === 'AbortError' ? 'canceled' : 'failed'; } finally { tap.finish(termination); reader.releaseLock(); }
             })();
             return res; // Preserve url/type/redirected and response identity.
           }
@@ -3519,7 +3532,35 @@ __mods["notifier"] = { fn: function (exp) {
   exp.flashTitle = flashTitle;
   exp.isDomGenerating = isDomGenerating;
 } };
+__mods["gacha-cooldown"] = { fn: function (exp) {
+  const WAIT_MS = 10000;
+  function createCooldown({now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout} = {}) {
+    let key = null, deadline = 0, timer = null;
+    const remaining = () => Math.max(0, Math.ceil(deadline - now()));
+    function cancel() { if (timer !== null) unschedule(timer); timer = null; }
+    function ended(nextKey) {
+      if (nextKey !== key) { cancel(); key = nextKey; deadline = now() + WAIT_MS; }
+      return remaining();
+    }
+    function afterWait(action, valid = () => true) {
+      cancel();
+      const expected = key;
+      const tick = () => {
+        timer = null;
+        if (key !== expected || !valid()) return;
+        const ms = remaining();
+        if (ms > 0) { timer = schedule(tick, ms); return; }
+        action();
+      };
+      timer = schedule(tick, remaining());
+    }
+    return {ended, remaining, afterWait, cancel};
+  }
+  exp.WAIT_MS = WAIT_MS;
+  exp.createCooldown = createCooldown;
+} };
 __mods["main"] = { fn: function (exp) {
+  var createCooldown = __req("gacha-cooldown").createCooldown;
   var latestTraceSummary = __req("trace-summary").latestTraceSummary;
   var desktopFacts = __req("trace-summary").desktopFacts;
   var sanitizeDetail = __req("agent-detail").sanitizeDetail;
@@ -3563,8 +3604,10 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.1+reasoning-migration';
+const VERSION = '1.2.3+gacha-cooldown';
 function boot(opts = {}) {
+  const cooldown = createCooldown();
+  const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
   const cfg = {
     showHUD: false,
     learn: true,
@@ -3660,7 +3703,7 @@ function boot(opts = {}) {
     // 实测踩过的坑：interceptor 会发出 'stream-header' 事件，但这里
     // 没有监听者，导致 token 流到 BUS 就断了，acceptToken 从未被调用，
     // 于是永远读不到 run trace，HUD 只能显示"模型家族未知"。
-    if (evt.kind === 'turn-start') { runReset(); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
+    if (evt.kind === 'turn-start') { cooldown.cancel(); runReset(); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
     if (evt.kind === 'diagnostic' || evt.kind === 'reasoning-detail') { recompute(evt.kind); return; }
     if (evt.kind === 'stream-header') {
       const d = evt.data || {};
@@ -3830,15 +3873,12 @@ function boot(opts = {}) {
       });
       notifier.notify(payload.title, payload.body, info);
 
-      let escNote = '';
+      cooldown.ended(cooldownKey());
       if (notifier.isAutoEscEnabled()) {
         const ok = notifier.triggerEscapeKey();
-        escNote = ok ? '（已自动触发 Esc 键）' : '（Esc 键触发失败）';
+        state.hud?.log(ok ? '已自动触发 Esc；下一轮抽卡仍需等待冷却结束。' : 'Esc 触发失败；下一轮抽卡仍需等待冷却结束。');
       }
-
-      if (state.hud) {
-        state.hud.log(`🔔 会话结束：${payload.title}${escNote}`);
-      }
+      state.hud?.log(`🔔 会话结束：${payload.title}；下一轮抽卡至少等待 10 秒。`);
     },
   });
 
@@ -3858,6 +3898,11 @@ function boot(opts = {}) {
   // 暴露 API 给控制台/自动化
   const api = {
     version: VERSION,
+    // The bridge marks confirmed completion, then polls this same monotonic deadline.
+    gachaCooldown: (markEnded = false) => {
+      if (markEnded) cooldown.ended(cooldownKey());
+      return {remainingMs: cooldown.remaining(), waitMs: 10000};
+    },
     nativeCapture: (event) => ingestNative(event),
     nativeStatus: () => nativeStatus(),
     bus: BUS,
