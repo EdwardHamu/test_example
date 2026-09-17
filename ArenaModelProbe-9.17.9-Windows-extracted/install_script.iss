@@ -1,13 +1,13 @@
 ﻿; Created by "innounp" version 2.67.11
-; Setup file: ArenaModelProbe-2026.9.17.8-x64.exe
+; Setup file: Arena模型探测工具-9.17.9-WIndows.exe
 ; Inno Setup Version: 6.7.0 (Unicode)
 
 [Setup]
-AppName=Arena模型探测工具
+AppName=Arena模型探测工具-稳定版
 AppId=ArenaCompanion.ModelProbe.Desktop
 AppVersion=2026.9.17.8
 DefaultDirName={localappdata}\Programs\ArenaModelCompanion
-OutputBaseFilename=ArenaModelProbe-2026.9.17.8-x64
+OutputBaseFilename=Arena模型探测工具-9.17.9-WIndows
 UninstallDisplayIcon={app}\Arena筛选助手.exe
 Compression=lzma2
 ArchitecturesAllowed=x64os
@@ -30,6 +30,7 @@ Source: "{app}\WebView2Loader.dll"; DestDir: "{app}";
 Source: "{app}\assets\arena-model-probe.ico"; DestDir: "{app}\assets"; 
 Source: "{app}\assets\arena-model-probe.inject.js"; DestDir: "{app}\assets"; 
 Source: "{app}\assets\arena-model-probe.png"; DestDir: "{app}\assets"; 
+Source: "{app}\assets\ArenaBalance.js"; DestDir: "{app}\assets"; 
 Source: "{app}\assets\AuthBridge.js"; DestDir: "{app}\assets"; 
 Source: "{app}\assets\CandidateBridge.js"; DestDir: "{app}\assets"; 
 Source: "{app}\assets\ConversationMarkdown.js"; DestDir: "{app}\assets"; 
@@ -45,11 +46,11 @@ Source: "{tmp}\webview2-offline-x64.exe"; DestDir: "{tmp}"; Flags: deleteafterin
 Source: "{tmp}\ndp48-x86-x64-allos-enu.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall dontcopy 
 
 [Run]
-Filename: "{app}\Arena筛选助手.exe"; Description: "启动 Arena模型探测工具"; Flags: postinstall skipifsilent nowait
+Filename: "{app}\Arena筛选助手.exe"; Description: "启动 Arena模型探测工具-稳定版"; Flags: postinstall unchecked skipifsilent nowait
 
 [Icons]
-Name: "{userprograms}\Arena模型探测工具"; Filename: "{app}\Arena筛选助手.exe"; 
-Name: "{userdesktop}\Arena模型探测工具"; Filename: "{app}\Arena筛选助手.exe"; Tasks: desktopicon; 
+Name: "{userprograms}\Arena模型探测工具-稳定版"; Filename: "{app}\Arena筛选助手.exe"; 
+Name: "{userdesktop}\Arena模型探测工具-稳定版"; Filename: "{app}\Arena筛选助手.exe"; Tasks: desktopicon; 
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; 

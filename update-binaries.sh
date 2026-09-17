@@ -2,7 +2,7 @@
 # Git Bash / Bash 4+: backup-first deployment. Never executes the packaged programs.
 set -Eeuo pipefail
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-SOURCE="$ROOT/ArenaModelProbe-2026.9.17.8-x64-extracted/{app}"
+SOURCE=""; SOURCE_GIVEN=0
 STORE="$ROOT/.binary-backups"
 LOCK="$ROOT/.binary-update.lock"
 SNAP=""; LOCKED=0; MUTATING=0; DRY_RUN=0; FORCE=0; RESTORE_STAGE=""
@@ -11,12 +11,18 @@ declare -a NAMES=() EXISTS=() OLD=() NEW=()
 usage() {
   cat <<'HELP'
 Usage (run with Git Bash):
+  bash update-binaries.sh                         # select source and confirm apply
+  bash update-binaries.sh sources                 # list available source folders
   bash update-binaries.sh apply --dry-run [--source DIR]
   bash update-binaries.sh apply [--source DIR]
   bash update-binaries.sh list
   bash update-binaries.sh rollback latest
   bash update-binaries.sh rollback SNAPSHOT_ID [--force]
 
+Without --source, apply scans the current working directory and prompts for a number.
+It recognizes immediate child folders containing payloads, or their {app} subfolder.
+No newest-version guessing; 0/q cancels. Non-interactive EOF cancels without changes.
+Explicit --source skips selection/confirmation for automation.
 Only top-level *.exe, *.dll and *.exe.config are copied (case-insensitive).
 The destination is always the folder containing this script, not the current cwd.
 Close the application before apply/rollback. No EXE is executed; assets are untouched.
@@ -123,14 +129,68 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-command=${1:-help}; (($# == 0)) || shift
+# Discover only immediate child directories and their literal {app} payload folder.
+# Never recurse into assets, backup snapshots, or bundled prerequisite installers.
+declare -a SOURCES=() SOURCE_COUNTS=()
+SCAN_ROOT=$(pwd -P)
+SELECTED_INTERACTIVELY=0
+payload_count() {
+  local dir="$1" f n count=0
+  for f in "$dir"/*; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    n=${f##*/}
+    if valid_name "$n"; then count=$((count+1)); fi
+  done
+  printf '%s' "$count"
+}
+discover_sources() {
+  local d candidate count
+  SOURCES=(); SOURCE_COUNTS=()
+  for d in "$SCAN_ROOT"/*; do
+    [[ -d "$d" && ! -L "$d" ]] || continue
+    case "${d##*/}" in assets|docs|tests|node_modules|build|dist|target) continue;; esac
+    candidate="$d"
+    if [[ -d "$d/{app}" && ! -L "$d/{app}" ]]; then candidate="$d/{app}"; fi
+    [[ "$candidate" != "$ROOT" ]] || continue
+    count=$(payload_count "$candidate")
+    if (( count > 0 )); then SOURCES+=("$candidate"); SOURCE_COUNTS+=("$count"); fi
+  done
+}
+show_sources() {
+  local i
+  printf 'Scan directory: %s\nAvailable source folders:\n' "$SCAN_ROOT"
+  for i in "${!SOURCES[@]}"; do
+    printf '  %d) %s (%s payload files)\n' "$((i+1))" "${SOURCES[$i]#"$SCAN_ROOT"/}" "${SOURCE_COUNTS[$i]}"
+  done
+  if ((${#SOURCES[@]} == 0)); then printf '  (none)\n'; fi
+}
+choose_source() {
+  local answer i
+  discover_sources; show_sources
+  ((${#SOURCES[@]} > 0)) || fail 'No usable source folders found. Change directory or use --source DIR.'
+  printf '  0) Cancel\n'
+  while true; do
+    printf 'Select a folder number (0/q to cancel): '
+    if ! IFS= read -r answer; then fail 'No selection received; cancelled. Use --source DIR for unattended runs.'; fi
+    answer=${answer%$'\r'}
+    case "$answer" in 0|q|Q) printf 'Cancelled; no files changed.\n'; exit 0;; esac
+    for i in "${!SOURCES[@]}"; do
+      if [[ "$answer" == "$((i+1))" ]]; then
+        SOURCE=${SOURCES[$i]}; SELECTED_INTERACTIVELY=1; return
+      fi
+    done
+    printf 'Invalid selection; enter one of the listed numbers.\n'
+  done
+}
+
+command=${1:-apply}; (($# == 0)) || shift
 case "$command" in
   help|-h|--help) usage; exit 0;;
   apply)
     while (($#)); do
       case "$1" in
         --dry-run) DRY_RUN=1; shift;;
-        --source) (($# >= 2)) || fail '--source requires a directory'; SOURCE=$2; shift 2;;
+        --source) (($# >= 2)) || fail '--source requires a directory'; [[ -n "$2" ]] || fail "--source requires a non-empty directory"; SOURCE=$2; SOURCE_GIVEN=1; shift 2;;
         *) fail "Unknown apply option: $1";;
       esac
     done;;
@@ -138,6 +198,7 @@ case "$command" in
     (($# >= 1)) || fail 'Specify a snapshot ID or latest.'
     ID=$1; shift
     if (($#)); then [[ "$1" == --force && $# == 1 ]] || fail 'Only --force is allowed after the snapshot ID.'; FORCE=1; fi;;
+  sources) (($# == 0)) || fail 'sources accepts no arguments'; discover_sources; show_sources; exit 0;;
   list) (($# == 0)) || fail 'list accepts no arguments';;
   *) usage; fail "Unknown command: $command";;
 esac
@@ -152,6 +213,7 @@ if [[ "$command" == list ]]; then
   done
   exit 0
 fi
+if [[ "$command" == apply && "$SOURCE_GIVEN" == 0 ]]; then choose_source; fi
 lock
 if [[ "$command" == rollback ]]; then
   if [[ "$ID" == latest ]]; then
@@ -185,6 +247,12 @@ for n in "${NAMES[@]}"; do
   if [[ -f "$ROOT/$n" ]]; then printf 'REPLACE %s\n' "$n"; else printf 'ADD     %s\n' "$n"; fi
 done
 if (( DRY_RUN )); then printf 'Dry run: no program files or backups changed.\n'; exit 0; fi
+if (( SELECTED_INTERACTIVELY )); then
+  printf 'Back up and replace the listed files? Close the app first. [y/N]: '
+  if ! IFS= read -r answer; then fail 'No confirmation received; cancelled.'; fi
+  answer=${answer%$'\r'}
+  case "$answer" in y|Y|yes|YES) ;; *) printf 'Cancelled; no program files or backups changed.\n'; exit 0;; esac
+fi
 mkdir -p -- "$STORE"
 SNAP=$(mktemp -d "$STORE/snap-$(date -u +%Y%m%d-%H%M%S)-XXXXXX")
 mkdir -- "$SNAP/files" "$SNAP/stage"

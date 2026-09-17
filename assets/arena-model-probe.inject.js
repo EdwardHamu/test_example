@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.3+gacha-cooldown — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.4+assets-9.17.9 — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -110,8 +110,9 @@ function latestTraceSummary(detail) {
  const current=spans.filter(s=>s.turn===turn),streams=current.filter(s=>s.kind==='stream');
  const usageRows=current.filter(s=>s.kind==='usage'),costRows=current.filter(s=>s.kind==='cost');
  const messageIds=new Set([...usageRows,...costRows].map(s=>s.values?.messageId).filter(Boolean));
+ const calls=streams.map(s=>({spanId:s.spanId,requestModel:label(s.values?.apiModelName||s.values?.requestModel||s.values?.apiModelId),partial:s.partial!==false}));
  const ambiguous=streams.length>1||usageRows.length>1||costRows.length>1||messageIds.size>1;
- if(ambiguous||turn===null||streams.length!==1||streams[0].partial!==false)return {coverage:ambiguous?'ambiguous':'partial',turn,usage:null,observation:observedReasoning(),configs:[],internalModel:null,internalTier:null,spanIds:[]};
+ if(ambiguous||turn===null||streams.length!==1||streams[0].partial!==false)return {calls,checkedAt:label(detail?.checkedAt),coverage:ambiguous?'ambiguous':'partial',turn,usage:null,observation:observedReasoning(),configs:[],internalModel:null,internalTier:null,spanIds:[]};
  const stream=streams[0],v=stream.values||{},usageSpans=current.filter(s=>s.kind==='usage'&&s.partial===false),costSpans=current.filter(s=>s.kind==='cost'&&s.partial===false);
  const one=(list,key)=>{const vals=[...new Set(list.map(s=>s.values?.[key]).filter(v=>v!==undefined&&v!==null))];return vals.length===1?vals[0]:null;};
  const observation=observedReasoning(v,stream.providerMeta||{});
@@ -123,13 +124,20 @@ function latestTraceSummary(detail) {
  const requestModel=label(v.apiModelName||v.requestModel||v.apiModelId);
  // A suffix also present in the request model (e.g. qwen3.8-max) is part of that model, not an observed configuration difference.
  const tier=internalTierFromModels(internalModel,requestModel);
+ const routeValues=[...new Set([label(v.modelProvider),label(one(usageSpans,'provider'))].filter(Boolean))];
+ const modelProvider=routeValues.length===1?routeValues[0]:null,routeConflict=routeValues.length>1;
+ const protocolProvider=label(v.provider),responseModel=label(v.responseModel||v.genResponseModel);
+ // An internal-name hint is not an explicit reasoning configuration and must not drive renaming.
+ const hintMatch=internalModel&&/^(.*)-(none|minimal|low|medium|high|xhigh|max)-agent$/i.exec(internalModel);
+ const normalize=s=>(s||'').toLowerCase().replace(/[._]/g,'-');
+ const internalNameHint=hintMatch&&normalize(hintMatch[1])===normalize(requestModel)?hintMatch[2].toLowerCase():null;
  const configs=[];
  for(const e of Array.isArray(stream.reasoning)?stream.reasoning.slice(0,60):[]){
   if(e?.kind==='effort')configs.push({kind:'effort',level:EFFORT_LEVELS.includes(e.level)?e.level:null,source:'run.span'});
   if(e?.kind==='budget'&&Number.isSafeInteger(e.value)&&e.value>=-1)configs.push({kind:'budget',value:e.value,source:'run.span'});
   if(e?.kind==='mode'&&['enabled','disabled','adaptive'].includes(e.value))configs.push({kind:'mode',value:e.value,source:'run.span'});
  }
- return {coverage:detail?.limited||detail?.stopped||!usageSpans.length||!costSpans.length?'partial':'complete',turn,usage,observation,configs,internalModel,internalTier:tier,requestModel,spanIds:current.map(s=>s.spanId),checkedAt:label(detail?.checkedAt)};
+ return {calls,coverage:detail?.limited||detail?.stopped||!usageSpans.length||!costSpans.length?'partial':'complete',turn,usage,observation,configs,internalModel,internalTier:tier,internalNameHint,requestModel,responseModel,modelProvider,protocolProvider,routeConflict,spanIds:current.map(s=>s.spanId),checkedAt:label(detail?.checkedAt)};
 }
 function desktopFacts(run,observations,evidence,detail) {
  const u=run?.usage,x=observations?.[observations.length-1];
@@ -141,7 +149,9 @@ function desktopFacts(run,observations,evidence,detail) {
  const effort=summarizeReasoning([...(evidence||[]),...configs.map(config=>({source:'reasoning.config',config}))]);
  const fallback=observedReasoning({reasoningTokens:usage?.reasoning});
  if(fallback.tokens!==null)fallback.source=usage?.source||'response';
- return {usage,effort,observation:detail?.observation||fallback,internalModel:detail?.internalModel||null,internalTier:detail?.internalTier||null,coverage:detail?.coverage||'no-detail',traceDetail:detail?{turn:detail.turn,spanIds:detail.spanIds,checkedAt:detail.checkedAt}:null};
+ const coverage=detail?.coverage||'no-detail';
+  const collectionStatus=['rate-limited','incomplete'].includes(run?.collectionStatus)?run.collectionStatus:coverage==='ambiguous'?'multi':detail?.routeConflict?'conflict':coverage==='complete'?(detail.internalTier?'collected':'unprovided'):coverage==='partial'?'incomplete':run?.fetchCount>=8?'incomplete':run?.collectionStatus||'pending';
+  return {collectionStatus,checkedAt:run?.checkedAt||detail?.checkedAt||null,usage,effort,observation:detail?.observation||fallback,internalModel:detail?.internalModel||null,internalTier:detail?.internalTier||null,internalNameHint:detail?.internalNameHint||null,requestModel:detail?.requestModel||null,responseModel:detail?.responseModel||null,modelProvider:detail?.modelProvider||null,protocolProvider:detail?.protocolProvider||null,routeConflict:detail?.routeConflict===true,coverage:detail?.coverage||'no-detail',traceDetail:detail?{calls:detail.calls||[],turn:detail.turn,spanIds:detail.spanIds,checkedAt:detail.checkedAt}:null};
 }
 
   exp.REASONING_SOURCES = REASONING_SOURCES;
@@ -183,7 +193,7 @@ function get(props, path) {
 const FIELDS = {
   stream: {
     apiModelId: ['ai.model.id', label], provider: ['ai.model.provider', label], responseModel: ['ai.response.model', label],
-    apiModelName: ['ai.telemetry.metadata.apiModelName', label], requestModel: ['gen_ai.request.model', label], genResponseModel: ['gen_ai.response.model', label],
+    modelProvider: ['ai.telemetry.metadata.modelProvider', label], apiModelName: ['ai.telemetry.metadata.apiModelName', label], requestModel: ['gen_ai.request.model', label], genResponseModel: ['gen_ai.response.model', label],
     reasoningSource: ['__derived.reasoningSource', reasoningSource], reasoningConflict: ['__derived.reasoningConflict', flag],
     temperature: ['ai.settings.temperature', number], maxOutputTokens: ['ai.settings.maxOutputTokens', count], topP: ['ai.settings.topP', number],
     finishReason: ['ai.response.finishReason', label], responseId: ['ai.response.id', label],
@@ -2071,7 +2081,9 @@ const TRIGGER_API = 'https://api.trigger.dev';
  * 状态
  * ------------------------------------------------------------------ */
 let activeController=null;
+let rateLimitUntil=0;
 const STATE = {
+  finalReadStarted:false, lastSeenTurn:0, minTurn:0, tokenUrl:null, collectionStatus:"pending", checkedAt:null,
   automaticTrace:null,
   detailRead:false,
   token: null,
@@ -2153,11 +2165,12 @@ function acceptToken(name, value) {
     reset();
     for (const e of BUS.evidence) if (e.source === 'run.trace.model' || e.config?.source === 'run.trace') e.stale = true;
   }
+  STATE.tokenUrl=location.origin+location.pathname;
   STATE.token = value;
   STATE.runId = rid || STATE.runId;
   STATE.tokenAt = Date.now();
   STATE.tokenExp = exp * 1000;
-  STATE.lastError = null;
+  STATE.lastError = Date.now()<rateLimitUntil?"http-429":null;
 
   BUS.emit({
     kind: 'run-token',
@@ -2169,6 +2182,25 @@ function acceptToken(name, value) {
     },
   });
   return true;
+}
+
+// A new submission is not a new account or necessarily a new run.
+function beginRunTurn(requestUrl) {
+  const token=STATE.token, url=location.origin+location.pathname;
+  const reuse=!!requestUrl&&STATE.tokenUrl===url&&automaticScope(decodeJwt(token)?.payload,url);
+  const baseline=STATE.lastSeenTurn||Number.MAX_SAFE_INTEGER;
+  reset();
+  if(reuse){STATE.minTurn=baseline;STATE.lastSeenTurn=baseline;acceptToken('public-access-token',token);}
+}
+function newestTraceTurn(trace,runId) {
+  let turn=0,active=0,events=[];
+  for(const e of trace?.events||[]){
+    if(e?.runId!==runId)continue;
+    const m=/^chat turn (\d+)$/.exec(e.message||'');
+    if(m){active=Number(m[1]);if(Number.isSafeInteger(active)&&active>=turn){turn=active;events=[];}}
+    if(turn&&active===turn)events.push(e);
+  }
+  return {turn,events};
 }
 function state() {
   const { token, ...safe } = STATE;
@@ -2197,10 +2229,11 @@ async function fetchRunModels(opts = {}) {
     return { ok: false, reason: 'no-token' };
   }
   if (STATE.tokenExp && Date.now() > STATE.tokenExp) {
-    STATE.lastError = 'token-expired';
+    STATE.collectionStatus='incomplete';STATE.lastError = 'token-expired';
     return { ok: false, reason: 'token-expired' };
   }
-  if(STATE.fetchCount>=8||STATE.detailRead||STATE.lastError==='http-429')return {ok:false,reason:'finished'};
+  if(Date.now()<rateLimitUntil){STATE.collectionStatus='rate-limited';return {ok:false,reason:'http-429'};}
+  if(STATE.fetchCount>=(opts.final?10:8)||(!opts.final&&STATE.detailRead))return {ok:false,reason:'finished'};
   if (STATE.fetching) return { ok: false, reason: 'busy' };
 
   STATE.fetching = true;
@@ -2227,21 +2260,35 @@ async function fetchRunModels(opts = {}) {
 
     if (!res.ok) {
       STATE.lastError = `http-${res.status}`;
+      STATE.collectionStatus=res.status===429?'rate-limited':'incomplete';
+      if(res.status===429)rateLimitUntil=Date.now()+120000;
       return { ok: false, reason: `http-${res.status}` };
     }
     const text = await res.text();
     if(text.length>4*1024*1024)throw new Error('trace-too-large');
     if (STATE.runId !== runId || STATE.token !== token || generation !== BUS.generation) return { ok: false, reason: 'superseded' };
-    const { models, tokens, reasoning, order, usage } = extractModelLabels(text);
+    const trace=JSON.parse(text),latest=newestTraceTurn(trace,runId);
+    if(latest.turn<=STATE.minTurn){STATE.collectionStatus='pending';return {ok:false,reason:'awaiting-current-turn'};}
+    STATE.lastSeenTurn=Math.max(STATE.lastSeenTurn,latest.turn);
+    const currentTrace={...trace,events:latest.events};
+    const { models, tokens, reasoning, order, usage } = extractModelLabels(JSON.stringify(currentTrace));
     STATE.usage = usage;
     for (const config of reasoning) BUS.push({ source: 'reasoning.config', config, runId });
 
     STATE.lastFetchAt = Date.now();
     STATE.lastError = null;
-    if(!STATE.detailRead) {
-      const automatic=await automaticDetail({trace:JSON.parse(text),runId,token,url:pageUrl,generation,attempt:STATE.fetchCount,fetch,signal:ctrl?.signal,live});
+    if(!STATE.detailRead||opts.final) {
+      const automatic=await automaticDetail({trace:currentTrace,runId,token,url:pageUrl,generation,attempt:STATE.fetchCount,fetch,signal:ctrl?.signal,live});
       if(!live())return {ok:false,reason:'superseded'};
-      if(automatic){STATE.automaticTrace=automatic;STATE.detailRead=true;if(automatic.detail.stopped?.includes('429'))STATE.lastError='http-429';BUS.emit({kind:'reasoning-detail',data:{runId,generation}});}
+      if(automatic){
+        STATE.automaticTrace=automatic;STATE.checkedAt=new Date().toISOString();
+        const summary=automatic.summary;
+        STATE.detailRead=summary.coverage==='complete';
+        STATE.collectionStatus=summary.coverage==='ambiguous'?'multi':summary.coverage==='complete'?(summary.internalTier?'collected':'unprovided'):'incomplete';
+        if(summary.routeConflict)STATE.collectionStatus='conflict';
+        if(automatic.detail.stopped?.includes('429')){STATE.lastError='http-429';rateLimitUntil=Date.now()+120000;STATE.collectionStatus='rate-limited';}
+        BUS.emit({kind:'reasoning-detail',data:{runId,generation}});
+      }else STATE.collectionStatus='pending';
     }
 
     if (models.length) {
@@ -2261,6 +2308,8 @@ async function fetchRunModels(opts = {}) {
     }
     return { ok: true, name: null, models: [], tokens };
   } catch (e) {
+    if(!live())return {ok:false,reason:'superseded'};
+    STATE.collectionStatus='incomplete';
     STATE.lastError = String((e && e.message) || e);
     return { ok: false, reason: STATE.lastError };
   } finally {
@@ -2317,13 +2366,25 @@ function startAutoResolve(opts = {}) {
   autoStarted = true;
 
   BUS.on(async (evt) => {
+    if(evt.kind==='observation'&&evt.data?.complete&&!STATE.finalReadStarted&&STATE.token){
+      STATE.finalReadStarted=true;
+      const runId=STATE.runId,generation=BUS.generation;
+      for(let i=0;i<2;i++){
+        await new Promise(r=>setTimeout(r,i?6000:2000));
+        if(runId!==STATE.runId||generation!==BUS.generation||Date.now()<rateLimitUntil)return;
+        const result=await fetchRunModels({final:true});
+        if(result.ok&&result.name){pushModelEvidence(result.name,runId);BUS.emit({kind:'run-model',data:{name:result.name,runId}});}
+        if(['http-401','http-403','http-404','http-429','token-expired','superseded'].includes(result.reason))return;
+      }
+      return;
+    }
     if (evt.kind !== 'run-token') return;
     const { runId } = evt.data || {};
     if (!runId) return;
     const generation = BUS.generation;
 
     // 延迟一点再开始，给 worker 时间执行模型调用
-    await new Promise(r => setTimeout(r, opts.initialDelayMs || 8000));
+    await new Promise(r => setTimeout(r, Math.max(opts.initialDelayMs || 8000,rateLimitUntil-Date.now())));
 
     if (STATE.runId !== runId || BUS.generation !== generation) return;
     const r = await pollRunModels({
@@ -2343,7 +2404,7 @@ function startAutoResolve(opts = {}) {
         const next=await fetchRunModels();
         if(STATE.runId!==runId||BUS.generation!==generation)return;
         if(['finished','token-expired','no-token','superseded','http-401','http-403','http-404','http-429'].includes(next.reason))return;
-        if(next.ok&&next.name&&next.name!==lastName){lastName=next.name;pushModelEvidence(next.name,runId);BUS.emit({kind:'run-model',data:{name:next.name,runId,all:next.models}});}
+        if(next.ok&&next.name){lastName=next.name;pushModelEvidence(next.name,runId);BUS.emit({kind:'run-model',data:{name:next.name,runId,all:next.models}});}
       }
     } else {
       BUS.emit({ kind: 'run-model-failed', data: { runId, reason: (r && r.reason) || 'unknown' } });
@@ -2352,6 +2413,7 @@ function startAutoResolve(opts = {}) {
 }
 function reset() {
   if(activeController)activeController.abort();activeController=null;
+  STATE.finalReadStarted=false;STATE.lastSeenTurn=0;STATE.minTurn=0;STATE.tokenUrl=null;STATE.collectionStatus=Date.now()<rateLimitUntil?"rate-limited":"pending";STATE.checkedAt=null;
   STATE.automaticTrace=null;STATE.detailRead=false;
   STATE.token = null;
   STATE.tokenExp = 0;
@@ -2367,6 +2429,8 @@ function reset() {
   exp.decodeJwt = decodeJwt;
   exp.runIdFromPayload = runIdFromPayload;
   exp.acceptToken = acceptToken;
+  exp.beginRunTurn = beginRunTurn;
+  exp.newestTraceTurn = newestTraceTurn;
   exp.state = state;
   exp.extractModelLabels = extractModelLabels;
   exp.fetchRunModels = fetchRunModels;
@@ -3592,6 +3656,7 @@ __mods["main"] = { fn: function (exp) {
   var fetchRunModels = __req("runmodel").fetchRunModels;
   var pollRunModels = __req("runmodel").pollRunModels;
   var pushModelEvidence = __req("runmodel").pushModelEvidence;
+  var beginRunTurn = __req("runmodel").beginRunTurn;
   var runState = __req("runmodel").state;
   var runReset = __req("runmodel").reset;
   var extractModelLabels = __req("runmodel").extractModelLabels;
@@ -3604,7 +3669,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.3+gacha-cooldown';
+const VERSION = '1.2.4+assets-9.17.9';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
@@ -3703,7 +3768,7 @@ function boot(opts = {}) {
     // 实测踩过的坑：interceptor 会发出 'stream-header' 事件，但这里
     // 没有监听者，导致 token 流到 BUS 就断了，acceptToken 从未被调用，
     // 于是永远读不到 run trace，HUD 只能显示"模型家族未知"。
-    if (evt.kind === 'turn-start') { cooldown.cancel(); runReset(); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
+    if (evt.kind === 'turn-start') { cooldown.cancel(); beginRunTurn(evt.data?.url); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
     if (evt.kind === 'diagnostic' || evt.kind === 'reasoning-detail') { recompute(evt.kind); return; }
     if (evt.kind === 'stream-header') {
       const d = evt.data || {};
