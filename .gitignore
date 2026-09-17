@@ -1,0 +1,45 @@
+# 程序、动态库与安装包（大小写不敏感）
+*.[eE][xX][eE]
+*.[dD][lL][lL]
+*.[mM][sS][iI]
+*.[mM][sS][iI][xX]
+*.[mM][sS][pP]
+*.[sS][yY][sS]
+*.[cC][oO][mM]
+*.[sS][oO]
+*.[sS][oO].*
+*.[dD][yY][lL][iI][bB]
+
+# 压缩包与磁盘镜像
+*.[zZ][iI][pP]
+*.7[zZ]
+*.[rR][aA][rR]
+*.[tT][aA][rR]
+*.[gG][zZ]
+*.[bB][zZ]2
+*.[xX][zZ]
+*.[tT][gG][zZ]
+*.[cC][aA][bB]
+*.[iI][sS][oO]
+*.[dD][mM][gG]
+*.[jJ][aA][rR]
+*.[wW][hH][lL]
+*.[nN][uU][pP][kK][gG]
+
+# 编译中间文件与二进制数据
+*.[oO][bB][jJ]
+*.[oO]
+*.[aA]
+*.[lL][iI][bB]
+*.[pP][dD][bB]
+*.[pP][yY][cC]
+*.[pP][yY][oO]
+*.[cC][lL][aA][sS][sS]
+*.[bB][iI][nN]
+*.[dD][aA][tT]
+
+# 程序文件备份；不忽略 .exe.config 等文本配置
+*.[eE][xX][eE].[bB][aA][kK]
+*.[dD][lL][lL].[bB][aA][kK]
+
+# JS、HTML、JSON、配置、文档及 PNG/ICO 等界面资源仍可纳入版本控制。
