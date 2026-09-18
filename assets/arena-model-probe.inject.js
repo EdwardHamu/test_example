@@ -3304,25 +3304,34 @@ __mods["notifier"] = { fn: function (exp) {
     document.addEventListener('keydown', onUserInteract, { capture: true, passive: true });
   }
 
-  function playFallbackChime() {
+  // A longer, moderately louder completion chime; system notification audio stays silent.
+  async function playCompletionChime() {
+    let ctx;
+    const close = () => {
+      try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch { /* noop */ }
+    };
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = new AudioCtx();
+      ctx = new AudioCtx();
+      if (ctx.state === 'suspended') await ctx.resume();
       const t = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(523.25, t); // C5
-      osc.frequency.setValueAtTime(659.25, t + 0.1); // E5
-      osc.frequency.setValueAtTime(783.99, t + 0.2); // G5
-      gain.gain.setValueAtTime(0.12, t);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      osc.frequency.setValueAtTime(659.25, t + 0.35); // E5
+      osc.frequency.setValueAtTime(783.99, t + 0.70); // G5
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.linearRampToValueAtTime(0.20, t + 0.02);
+      gain.gain.setValueAtTime(0.20, t + 0.80);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.50);
       osc.connect(gain);
       gain.connect(ctx.destination);
+      osc.onended = close;
       osc.start(t);
-      osc.stop(t + 0.45);
-    } catch { /* noop */ }
+      osc.stop(t + 1.50);
+    } catch { close(); /* Audio failure must not interrupt notifications or auto Esc. */ }
   }
 
   function flashTitle(badgeText = '回答完成', times = 4) {
@@ -3344,9 +3353,9 @@ __mods["notifier"] = { fn: function (exp) {
 
     // 网页标题闪烁提醒
     flashTitle('回答完成');
+    playCompletionChime();
 
     if (typeof Notification === 'undefined') {
-      playFallbackChime();
       return false;
     }
 
@@ -3357,7 +3366,7 @@ __mods["notifier"] = { fn: function (exp) {
           icon: NOTIFY_ICON,
           tag: 'amp-session-end',
           renotify: true,
-          silent: false,
+          silent: true,
         });
         n.onclick = function () {
           try {
@@ -3367,8 +3376,7 @@ __mods["notifier"] = { fn: function (exp) {
         };
         return true;
       } catch (err) {
-        console.warn('[amp] 系统通知弹出失败，使用降级提示:', err);
-        playFallbackChime();
+        console.warn('[amp] 系统通知弹出失败，保留音频提示:', err);
         return false;
       }
     };
@@ -3378,12 +3386,10 @@ __mods["notifier"] = { fn: function (exp) {
     } else if (Notification.permission === 'default') {
       requestPermission().then(perm => {
         if (perm === 'granted') doNotify();
-        else playFallbackChime();
-      }).catch(() => { playFallbackChime(); });
+      }).catch(() => {});
       return false;
     } else {
-      // 权限被拒绝时使用音频提示降级
-      playFallbackChime();
+      // 通知权限被拒绝时，仍已播放上面的统一完成提示音
       return false;
     }
   }
@@ -3592,9 +3598,90 @@ __mods["notifier"] = { fn: function (exp) {
   exp.testNotification = testNotification;
   exp.formatPayload = formatPayload;
   exp.initSessionWatcher = initSessionWatcher;
-  exp.playFallbackChime = playFallbackChime;
+  exp.playCompletionChime = playCompletionChime;
+  exp.playFallbackChime = playCompletionChime; // Preserve the legacy export name.
   exp.flashTitle = flashTitle;
   exp.isDomGenerating = isDomGenerating;
+} };
+__mods["captcha-alert"] = { fn: function (exp) {
+  // Inspect only visible UI, never conversation text or cross-origin frame contents.
+  function visible(el) {
+    if (!el || el.closest('[hidden],[aria-hidden="true"],[role="log"]')) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let p = el; p; p = p.parentElement) {
+      const s = getComputedStyle(p);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.visibility === 'collapse' || Number(s.opacity) === 0) return false;
+    }
+    return true;
+  }
+  function detected() {
+    if (typeof document === 'undefined') return false;
+    const pattern = /security verification|verify (?:that )?you(?:'re| are) human|human verification|人机(?:身份)?验证|人机检测|安全验证/i;
+    for (const el of document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog[open]')) {
+      if (visible(el) && pattern.test(el.innerText || el.textContent || '')) return true;
+    }
+    for (const el of document.querySelectorAll('iframe[src]')) {
+      if (!visible(el)) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 160 || rect.height < 80) continue;
+      try {
+        const u = new URL(el.getAttribute('src'), location.href);
+        if ((u.hostname === 'challenges.cloudflare.com' && /challenge|turnstile/i.test(u.pathname))
+          || (/(^|\.)(google\.com|recaptcha\.net)$/.test(u.hostname) && /\/recaptcha\/.*\/bframe/.test(u.pathname))
+          || (/(^|\.)hcaptcha\.com$/.test(u.hostname) && /challenge/i.test(u.href))) return true;
+      } catch { /* malformed frame URL */ }
+    }
+    return false;
+  }
+  async function playWarning() {
+    let ctx;
+    const close = () => { try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {} };
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      ctx = new AudioCtx();
+      if (ctx.state === 'suspended') await ctx.resume();
+      const t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.0001, t);
+      for (let i = 0; i < 3; i++) {
+        const at = t + i * 0.45;
+        osc.frequency.setValueAtTime(i % 2 ? 660 : 880, at);
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.linearRampToValueAtTime(0.22, at + 0.02);
+        gain.gain.setValueAtTime(0.22, at + 0.18);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.30);
+      }
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.onended = close; osc.start(t); osc.stop(t + 1.25);
+    } catch { close(); }
+  }
+  function start({enabled = () => true, detect = detected, sound = playWarning} = {}) {
+    const key = '__AMP_CAPTCHA_WATCHER__';
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+    window[key]?.stop?.();
+    let announced = false, misses = 0, stopped = false;
+    function check() {
+      if (stopped) return;
+      try {
+        if (!detect()) { if (++misses >= 2) announced = false; return; }
+        misses = 0;
+        if (!announced && enabled()) {
+          announced = true;
+          Promise.resolve(sound()).catch(() => {});
+        }
+      } catch { /* DOM/audio errors must not interfere with the page. */ }
+    }
+    const timer = setInterval(check, 750);
+    const api = {check, stop() { stopped = true; clearInterval(timer); }};
+    window[key] = api;
+    check();
+    return api;
+  }
+  exp.detected = detected;
+  exp.playWarning = playWarning;
+  exp.start = start;
 } };
 __mods["gacha-cooldown"] = { fn: function (exp) {
   const WAIT_MS = 10000;
@@ -3929,6 +4016,7 @@ function boot(opts = {}) {
   }
 
   /* ---------------- 监听会话结束并弹出系统通知与自动触发 Esc ---------------- */
+  __req("captcha-alert").start({enabled: notifier.isEnabled});
   notifier.initSessionWatcher({
     onSessionEnd: (info) => {
       recompute('session-end');
