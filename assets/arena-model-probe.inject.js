@@ -3683,6 +3683,123 @@ __mods["captcha-alert"] = { fn: function (exp) {
   exp.playWarning = playWarning;
   exp.start = start;
 } };
+__mods["gacha-runner"] = { fn: function (exp) {
+  const target = name => typeof name === 'string' && /astra|fable/i.test(name);
+  function create({bridge, info, blocked = () => false, now = () => performance.now(), random = Math.random,
+    claim = () => {}, release = () => {}, onChange = () => {}}) {
+    const owner = {};
+    let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始'}, prompt='', chars=[], typed='', due=0,
+      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false;
+    function report(message) { s.message=message; onChange({...s}); }
+    function pause(message) { s.status='paused'; report(message+'；已暂停，请处理后重新开始。'); }
+    function phase(name,delay=0,timeout=30000) { s.phase=name; due=now()+delay; deadline=now()+timeout; }
+    function stop() { s.status='stopped'; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
+    function start(value) {
+      if(s.status==='running') return false;
+      prompt=String(value||'').trim();
+      if(!prompt || Array.from(prompt).length>1000) throw Error('提示词需为 1–1000 个字符');
+      const b=bridge();if(!b?.typeDraft || !b?.action || !b?.read) throw Error('网页桥接未就绪，请刷新并确认 PageBridge 已加载');
+      const v=b.read(prompt);
+      if(v.generating || v.draft || v.attachmentNames?.length || v.blocker || blocked()) throw Error('请先处理生成、草稿、附件或验证/限流提示');
+      claim(owner); chars=Array.from(prompt); typed=''; gen=null; endedAt=null; expanded=false;
+      s={status:'running',phase:'prepare',round:0,model:'',message:'准备新对话；请勿同时运行桌面抽卡'};
+      phase('prepare',800);report(s.message);return true;
+    }
+    function action(name) {
+      const r=bridge().action(name,prompt,true,owner);
+      if(r?.waiting) { due=now()+500;return false; }
+      if(!r?.ok) throw Error('网页操作未确认：'+name);
+      return true;
+    }
+    function tick() {
+      if(s.status!=='running' || now()<due)return;
+      due=now()+250; // Non-typing states need no high-frequency DOM polling.
+      try {
+        const b=bridge();if(!b)throw Error('网页桥接丢失');
+        const v=b.read(prompt), f=info();
+        if(blocked() || v.blocker) {pause(v.blocker||'需要手动完成人机验证');return;}
+        if(v.attachmentNames?.length) {pause('检测到附件，保留现场');return;}
+        if(v.failed && s.phase==='answer') {pause('本轮生成失败');return;}
+        if(now()>deadline) {pause('等待页面、回答或模型名超时');return;}
+        if(gen!==null && f.generation===gen && f.modelUrl===v.url && target(f.model)) {
+          s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;
+        }
+        if(s.phase==='prepare' && gen!==null && v.url!==roundUrl){pause('准备下一轮时页面被切换');return;}
+        if(['typing','send'].includes(s.phase) && v.url!==editUrl) {pause('输入期间页面发生跳转');return;}
+        switch(s.phase) {
+          case 'prepare':
+            if(v.generating || v.draft) {pause('当前有生成或草稿，未覆盖');return;}
+            if(!v.main)return;
+            if(v.conversation) {
+              if(!v.newLinks && v.canExpand && !expanded){if(action('expand')){expanded=true;phase('prepare',800);}return;}
+              if(!action('new'))return;
+              expanded=false;
+              phase('opening',1000);report('等待新对话页面');
+            } else {editUrl=v.url;typed='';phase('typing',600,180000);report('逐字符输入提示词');}
+            break;
+          case 'opening':
+            if(!v.main || v.conversation || !v.editor || v.generating)return;
+            if(v.draft){pause('新对话已有草稿');return;}
+            editUrl=v.url;typed='';phase('typing',600,180000);report('逐字符输入提示词');break;
+          case 'typing': {
+            if(v.generating || v.conversation || v.draft!==typed.trim()){pause('页面或草稿被其他操作改变');return;}
+            if(!v.editor)return;
+            const next=chars.slice(0,Array.from(typed).length+1).join('');
+            const r=b.typeDraft(typed,next,owner);
+            if(r?.waiting){due=now()+500;return;}
+            if(!r?.ok)throw Error('输入未确认');
+            typed=next;due=now()+50+Math.floor(Math.max(0,Math.min(0.999999,random()))*101);
+            if(typed===prompt){phase('send',1000);report('输入完成，等待发送条件');}
+            break;
+          }
+          case 'send':
+            if(v.draft!==prompt || v.generating || v.conversation){pause('发送前页面或草稿改变');return;}
+            if(!v.sendReady)return;
+            baseGen=f.generation;gen=null;roundUrl=null;endedAt=null;
+            if(!action('send'))return;
+            s.round++;s.model='';phase('answer',500,240000);report('已发送，等待本轮真实模型名');break;
+          case 'answer':
+            if(gen===null){
+              if(f.generation<=baseGen)return;
+              if(f.generation!==baseGen+1){pause('检测到其他会话操作');return;}
+              if(!/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/i.test(v.url) || !v.promptConfirmed)return;
+              gen=f.generation;roundUrl=v.url;
+            }
+            if(f.generation!==gen || v.url!==roundUrl){pause('会话已切换，保留当前页面');return;}
+            if(f.model && f.modelUrl===v.url){
+              s.model=f.model;
+              if(target(f.model)) {s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;}
+            }
+            if(!v.generating && v.responseComplete){
+              if(endedAt===null){endedAt=now();report('回答完成，等待模型名与至少 10 秒冷却');}
+              if(now()-endedAt>120000 && !s.model){pause('未识别到本轮真实模型名');return;}
+              if(s.model && now()-endedAt>=10000){phase('prepare',800);report('未命中，准备下一轮');}
+            }
+            break;
+        }
+      } catch(e) {pause(e?.message||String(e));}
+    }
+    return {start,stop,tick,state:()=>({...s}),dispose:()=>{stop();}};
+  }
+  function mount({info, blocked}) {
+    if(typeof document==='undefined' || !document.body)return null;
+    window.__AMP_PAGE_GACHA__?.dispose?.();
+    const root=document.createElement('aside');root.id='amp-target-gacha';
+    root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
+    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">你好，请简短介绍一下你自己。</textarea><small>每轮发送会消耗额度。每轮至少等待10秒。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button> <button type="button" data-stop>停止</button>';
+    const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
+    const runner=create({bridge:()=>window.__arenaCompanion,info,blocked,
+      claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
+      onChange:s=>{status.textContent=`第 ${s.round} 轮 · ${s.message}`;startButton.disabled=s.status==='running';input.disabled=s.status==='running';}});
+    startButton.onclick=()=>{try{runner.start(input.value);}catch(e){status.textContent=e.message;}};
+    root.querySelector('[data-stop]').onclick=()=>runner.stop();
+    document.body.appendChild(root);
+    const timer=setInterval(runner.tick,25);
+    const api={start:runner.start,stop:runner.stop,state:runner.state,dispose(){clearInterval(timer);runner.dispose();root.remove();}};
+    window.__AMP_PAGE_GACHA__=api;return api;
+  }
+  exp.target=target;exp.create=create;exp.mount=mount;
+} };
 __mods["gacha-cooldown"] = { fn: function (exp) {
   const WAIT_MS = 10000;
   function createCooldown({now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout} = {}) {
@@ -4051,6 +4168,7 @@ function boot(opts = {}) {
   // 暴露 API 给控制台/自动化
   const api = {
     version: VERSION,
+    captchaDetected: () => __req("captcha-alert").detected(),
     // The bridge marks confirmed completion, then polls this same monotonic deadline.
     gachaCooldown: (markEnded = false) => {
       if (markEnded) cooldown.ended(cooldownKey());
@@ -4133,6 +4251,22 @@ function boot(opts = {}) {
   for (const evt of BUS.pendingHeaders.splice(0)) BUS.emit(evt);
   recompute('boot');
   try { window.__MODEL_PROBE__ = api; } catch { /* noop */ }
+  const mountGacha = () => {
+    if (window.__MODEL_PROBE__ !== api) return;
+    try {
+      api.pageGacha = __req("gacha-runner").mount({
+        info: () => { const rs=runState(); return {generation:BUS.generation,model:rs.modelName || "",modelUrl:rs.tokenUrl}; },
+        blocked: () => __req("captcha-alert").detected(),
+      });
+    } catch (err) {
+      api.pageGacha = null;
+      console.warn('[amp] 网页抽卡面板初始化失败；探针其他功能仍可使用:', err);
+    }
+  };
+  if (typeof document !== 'undefined') {
+    if (document.body) mountGacha();
+    else document.addEventListener('DOMContentLoaded', mountGacha, {once:true});
+  }
   return api;
 }
 
