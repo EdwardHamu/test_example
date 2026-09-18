@@ -51,7 +51,7 @@ test('new generation or user navigation after submission pauses instead of conti
 
 test('panel mounts idle, starts only on click and disposes previous interval/panel',()=>{
  const timers=new Map(),panels=[];let id=0,actions=0;
- const window={__arenaCompanion:{read:()=>({draft:'',attachmentNames:[],generating:false}),typeDraft(){actions++;},action(){actions++;}}};
+ const window={__arenaCompanion:{pageRunnerProtocol:'amp-keystrokes-v1',attachmentsReady:()=>true,read:()=>({draft:'',attachmentNames:[],generating:false}),typeDraft(){actions++;},action(){actions++;}}};
  const document={body:{appendChild:root=>panels.push(root)},createElement(){
    const controls={'[data-status]':{},'[data-start]':{},'[data-stop]':{},'textarea':{value:'你好'}};
    return {style:{},querySelector:s=>controls[s],remove(){this.removed=true;}};

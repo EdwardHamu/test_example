@@ -76,6 +76,7 @@
     };
   };
   window.__arenaCompanion = {
+    pageRunnerProtocol: 'amp-keystrokes-v1',
     read: view,
     attachmentsReady: names => {
       if(!names.length)return true;

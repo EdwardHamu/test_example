@@ -4,13 +4,13 @@
 
 用户选择新增网页内独立流程，而非修改桌面 EXE 的原有“开始抽卡”。实现位于 `assets/arena-model-probe.inject.js` 的 gacha-runner 模块，配套修改 `assets/PageBridge.js`。
 
-1. 重启应用或刷新 Arena 页面，使两个新版脚本加载。页面右下角显示“目标抽卡 · astra / fable”。
-2. 展开“提示词与说明”修改每轮提示词，默认“你好，请简短介绍一下你自己。”；支持 1–1000 个 Unicode 字符。
+1. 重启应用或刷新 Arena 页面，加载新版探针（桥接代码已内置）。页面右下角显示“目标抽卡 · astra / fable”。
+2. 展开“提示词与说明”修改每轮提示词，默认“只回答数字1，不要补充其他文字。”；支持 1–1000 个 Unicode 字符。
 3. 完成登录/验证，清理不打算发送的草稿和附件后，点击网页面板“开始”。不自动启动，不与桌面原有抽卡同时运行。
 4. 命中后保留会话和正在生成的回答。停止按钮只终止本流程的后续操作，不删除草稿、不主动中断生成。
 5. 遇到暂停需手动处理原因，再重新开始；不是从任意部分输入位置自动恢复。完整刷新不会自动恢复抽卡。
 
-程序接口：`window.__MODEL_PROBE__.pageGacha.start(prompt)` / `.stop()` / `.state()`。页面桥接缺失时开始操作明确报错，不回退到无保护发送。需要宿主实际加载更新后的 PageBridge；没有修改 EXE 的加载时机。
+程序接口：`window.__MODEL_PROBE__.pageGacha.start(prompt)` / `.stop()` / `.state()`。独立面板在取桥接时调用内置 page-bridge.ensure()：缺失或不兼容时离线初始化最新版桥接，兼容时复用；不再依赖宿主先单独加载 PageBridge.js。
 
 ## 匹配与流程
 
@@ -36,7 +36,7 @@
 ## 验证与限制
 
 - 新增 `tests/page-gacha.test.cjs` 与 `tests/page-gacha-bridge.test.cjs`，32 项模拟时钟/页面测试覆盖：目标匹配、过期来源隔离、连续两轮、延迟到达目标、10秒边界、分段输入、操作权、手动修改、限流/验证码、停止及面板挂载销毁。
-- 全部 104 项测试通过；两份 JS 语法及 git diff --check 通过；assets 诊断无错误/警告。
+- 全部 109 项测试通过；两份 JS 语法及 git diff --check 通过；assets 诊断无错误/警告。
 - 尚未在真实 Arena WebView 联测；没有发送真实模型请求、消耗额度、启动桌面程序或修改 EXE。网页 DOM、React 状态结构或宿主脚本加载方式变化可能需要适配。
 - 不保证抽到指定模型，不保证自动操作与真人不可区分。未提交或推送 Git。
 
@@ -45,3 +45,12 @@
 - 新增 10 项测试覆盖单字符约束、事件取消、按键元数据、监听器修改保护、所有权丢失、50/100/150ms 边界、每字符重新取样和浏览器停顿后不批量补发。
 - 原冷却测试改为等待非输入状态下一次采样，不再假设每毫秒都轮询；仍断言 9999ms 前不得开新会话，以及每次新建时间不早于完成后 10000ms。
 - astra/fable 命中条件、10秒冷却、验证码与限流暂停、原有提示音均未改变。仅模拟测试，未执行真实抽卡。
+
+## 桥接未就绪修复
+
+- 原问题：页面内流程只读取 window.__arenaCompanion，假定桌面宿主已提前注入 PageBridge.js；这个加载顺序假设不可靠。
+- 探针内新增静态 page-bridge 模块；从 assets/PageBridge.js 生成，不使用 fetch、eval 或外部 script 标签，不受外部脚本地址/CSP 加载路径限制。
+- 检查 pageRunnerProtocol 标识及 read/action/typeDraft/attachmentsReady 方法；缺失、旧版或后来被替换时重新安装。仅初始化方法，不会自行发送请求、输入或新建会话。
+- 源码维护：修改 assets/PageBridge.js 后运行 `node sync-page-bridge.cjs`，同步探针内嵌副本；`node sync-page-bridge.cjs --check` 验证同步。比较时统一 CRLF/LF，写回时保留探针原换行风格。
+- 新增 tests/page-bridge-bootstrap.test.cjs 五项测试，包括真实模块装载、无桥接启动面板、旧版恢复、操作权保留及副本同步；全部 109 项通过，JS 语法、同步检查、git diff --check 通过，assets 诊断无错误/警告。
+- 仍未进行真实 WebView 联测；本次没有发起真实抽卡。需要刷新页面或重启应用加载修复后的探针，不需要先点桌面“开始抽卡”。
