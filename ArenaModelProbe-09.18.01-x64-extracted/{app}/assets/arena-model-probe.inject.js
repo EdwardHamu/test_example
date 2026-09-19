@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.4+assets-9.17.9 — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.0.0+0a1993bf — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -1332,10 +1332,6 @@ const BUS = {
   },
 };
 
-function auditParserEvent(id, kind, count) {
-  try { globalThis.__coverageAudit?.parserEvent?.(id, kind, count); } catch { /* Diagnostics must not interrupt capture. */ }
-}
-
 const now = () => performance.now();
 function nativeActive() { return BUS.captureMode === 'cdp' && Date.now() - (BUS.nativeLastSeen || 0) < 15000; }
 function beginTurn(url = '') {
@@ -1466,7 +1462,7 @@ class SSETap {
     }
     this.chunks++;
     this.text += s;
-    if (this.text.length > 400000) {auditParserEvent(this.ctx.nativeId,'text-retention-trim',this.text.length-200000);this.text = this.text.slice(-200000);}
+    if (this.text.length > 400000) {globalThis.__coverageAudit?.parserEvent(this.ctx.nativeId,'text-retention-trim',this.text.length-200000);this.text = this.text.slice(-200000);}
 
     this.buf += s;
     const lines = this.buf.split('\n');
@@ -1497,7 +1493,7 @@ class SSETap {
     if (payload === '[DONE]') { this.publish(true); return; }
 
     let obj = null;
-    try { obj = JSON.parse(payload); } catch { auditParserEvent(this.ctx.nativeId,'outer-json-fallback',1); }
+    try { obj = JSON.parse(payload); } catch { globalThis.__coverageAudit?.parserEvent(this.ctx.nativeId,'outer-json-fallback',1); }
 
     if (obj) {
       // ---- arena.ai realtime batch：records[].body 是「JSON 字符串里再套 JSON」----
@@ -1515,7 +1511,7 @@ class SSETap {
           }
           if (typeof rec.body !== 'string') continue;
           let inner = null;
-          try { inner = JSON.parse(rec.body); } catch { auditParserEvent(this.ctx.nativeId,'record-body-json-error',1);continue; }
+          try { inner = JSON.parse(rec.body); } catch { globalThis.__coverageAudit?.parserEvent(this.ctx.nativeId,'record-body-json-error',1);continue; }
           this.consumeFrame(inner, `seq${rec.seq_num}`);
         }
       }
@@ -1573,17 +1569,6 @@ class SSETap {
     this.frames = this.frames || [];
     const tag = obj.type || obj.object || (Array.isArray(obj.candidates) ? 'candidates' : null);
     if (typeof tag === 'string' && !this.frames.includes(tag)) this.frames.push(tag);
-
-    // 检查完成帧（Vercel AI SDK finish / finish-step、stop_reason、finishReason、OpenAI choices finish_reason 等）
-    const isFinishFrame = tag === 'finish'
-      || (obj.finishReason && obj.finishReason !== 'null')
-      || (obj.stop_reason && obj.stop_reason !== 'null')
-      || (Array.isArray(obj.choices) && obj.choices.some(c => c && c.finish_reason && c.finish_reason !== 'null'))
-      || (Array.isArray(obj.candidates) && obj.candidates.some(c => c && c.finishReason && c.finishReason !== 'null'));
-    if (isFinishFrame) {
-      this.meaningful = true;
-      this.publish(true);
-    }
 
     // 3) 递归解包常见的嵌套容器
     for (const key of ['data', 'delta', 'message', 'response', 'payload', 'event']) {
@@ -2287,7 +2272,6 @@ async function fetchRunModels(opts = {}) {
         STATE.collectionStatus=summary.coverage==='ambiguous'?'multi':summary.coverage==='complete'?(summary.internalTier?'collected':'unprovided'):'incomplete';
         if(summary.routeConflict)STATE.collectionStatus='conflict';
         if(automatic.detail.stopped?.includes('429')){STATE.lastError='http-429';rateLimitUntil=Date.now()+120000;STATE.collectionStatus='rate-limited';}
-        BUS.emit({kind:'reasoning-detail',data:{runId,generation}});
       }else STATE.collectionStatus='pending';
     }
 
@@ -2332,12 +2316,15 @@ async function pollRunModels(opts = {}) {
   const runId = STATE.runId, generation = BUS.generation;
   let last = null;
 
+  let wait = opts.firstIntervalMs || 1500;
   while (Date.now() - t0 < maxMs) {
     if (STATE.runId !== runId || BUS.generation !== generation) return { ok: false, reason: 'superseded' };
     last = await fetchRunModels(opts);
     if (last.ok && last.name) return last;
     if (['finished','token-expired','no-token','superseded','http-401','http-403','http-404','http-429'].includes(last.reason)) return last;
-    await new Promise(r => setTimeout(r, intervalMs));
+    // Short answers finish within seconds: start fast, back off gently to the configured interval.
+    await new Promise(r => setTimeout(r, wait));
+    wait = Math.min(intervalMs, Math.round(wait * 1.6));
   }
   return last || { ok: false, reason: 'timeout' };
 }
@@ -2369,8 +2356,8 @@ function startAutoResolve(opts = {}) {
     if(evt.kind==='observation'&&evt.data?.complete&&!STATE.finalReadStarted&&STATE.token){
       STATE.finalReadStarted=true;
       const runId=STATE.runId,generation=BUS.generation;
-      for(let i=0;i<2;i++){
-        await new Promise(r=>setTimeout(r,i?6000:2000));
+      for(let i=0;i<3;i++){
+        await new Promise(r=>setTimeout(r,i===0?500:i===1?2000:5000));
         if(runId!==STATE.runId||generation!==BUS.generation||Date.now()<rateLimitUntil)return;
         const result=await fetchRunModels({final:true});
         if(result.ok&&result.name){pushModelEvidence(result.name,runId);BUS.emit({kind:'run-model',data:{name:result.name,runId}});}
@@ -2384,12 +2371,13 @@ function startAutoResolve(opts = {}) {
     const generation = BUS.generation;
 
     // 延迟一点再开始，给 worker 时间执行模型调用
-    await new Promise(r => setTimeout(r, Math.max(opts.initialDelayMs || 8000,rateLimitUntil-Date.now())));
+    await new Promise(r => setTimeout(r, Math.max(opts.initialDelayMs ?? 8000,rateLimitUntil-Date.now())));
 
     if (STATE.runId !== runId || BUS.generation !== generation) return;
     const r = await pollRunModels({
       maxMs: opts.maxMs || 180000,
       intervalMs: opts.intervalMs || 6000,
+      firstIntervalMs: opts.firstIntervalMs || 1500,
     });
     if (STATE.runId !== runId || BUS.generation !== generation) return;
     if (r && r.ok && r.name) {
@@ -2399,7 +2387,7 @@ function startAutoResolve(opts = {}) {
       let lastName=r.name;
       for(let i=0;i<7;i++) {
         if(STATE.detailRead||STATE.fetchCount>=8)return;
-        await new Promise(resolve=>setTimeout(resolve,opts.intervalMs||6000));
+        await new Promise(resolve=>setTimeout(resolve,i<2?2000:(opts.intervalMs||6000)));
         if(STATE.runId!==runId||BUS.generation!==generation)return;
         const next=await fetchRunModels();
         if(STATE.runId!==runId||BUS.generation!==generation)return;
@@ -3018,12 +3006,6 @@ class HUD {
   confidenceClass(c) { return c >= 0.8 ? 'ok' : c >= 0.5 ? 'inf' : 'warn'; }
 
   render(v, extras = {}) {
-    const facts = extras.reasoningFacts || {};
-    const reasoning = extras.reasoning || facts.effort || {};
-    const observation = facts.observation || {};
-    const observedLabel = observation.status === 'conflict' ? '冲突（来源数值不一致）'
-      : observation.status === 'reported-positive' ? `${observation.tokens} tokens（报告值 > 0）`
-      : observation.status === 'reported-zero' ? '0 tokens（报告值，不等于证明未思考）' : '未提供';
     const dotCls = !v ? '' : v.mode === 'RESOLVED' ? '' : v.mode === 'INFERRED' ? 'warn' : 'bad';
     const vd = v || {
       mode: 'WARMING', modelId: null, family: null, gen: null,
@@ -3097,17 +3079,9 @@ class HUD {
           ${vd.note ? `<div class="ev" style="opacity:.7">${esc(vd.note)}</div>` : ''}
         </div>
         <div class="sec">推理强度 · 显式配置</div>
-        <div class="row"><span class="k">档位</span><span class="v">${esc(reasoning.display || reasoning.level || '未知 / 未暴露')}</span></div>
-        ${reasoning.budgetText ? `<div class="row"><span class="k">预算</span><span class="v">${esc(reasoning.budgetText)}（不换算为档位）</span></div>` : ''}
-        ${reasoning.modes?.length ? `<div class="row"><span class="k">思考模式</span><span class="v">${esc(reasoning.modes.join(' / '))}</span></div>` : ''}
-        <div class="ev">${esc(reasoning.note || '不根据耗时、回答长度或名称后缀推断显式强度。')}</div>
-        ${(reasoning.evidence || []).map(e => `<div class="ev">${esc(e.source)} · ${esc(e.path || '')} = ${esc(e.kind === 'budget' ? e.value + ' tokens（预算，非档位）' : e.kind === 'mode' ? e.value : e.raw || e.level || '[unsupported]')}</div>`).join('')}
-        <div class="sec">内部档位线索与推理用量</div>
-        <div class="row"><span class="k">内部档位</span><span class="v">${esc(facts.internalTier || '未知')}（名称后缀，非显式配置）</span></div>
-        ${facts.internalModel ? `<div class="row"><span class="k">内部模型标签</span><span class="v">${esc(facts.internalModel)}</span></div>` : ''}
-        <div class="row"><span class="k">推理 Token</span><span class="v">${esc(observedLabel)}</span></div>
-        ${observation.source ? `<div class="ev">统计来源：${esc(observation.source)}</div>` : ''}
-        <div class="ev">Trace 覆盖：${esc(facts.coverage || 'no-detail')}；名称后缀及 Token 数均不能证明实际思考强度。</div>
+        <div class="row"><span class="k">档位</span><span class="v">${esc(extras.reasoning?.level || (extras.reasoning?.status === 'conflict' ? '冲突，需分调用复核' : '未知 / 未暴露'))}</span></div>
+        <div class="ev">${esc(extras.reasoning?.note || '不根据耗时、回答长度或名称后缀推断。')}</div>
+        ${(extras.reasoning?.evidence || []).map(e => `<div class="ev">${esc(e.source)} · ${esc(e.path)} = ${esc(e.kind === 'budget' ? e.value + ' tokens（预算，非档位）' : e.raw)}</div>`).join('')}
         <div class="sec">采集诊断</div>
         <div class="ev" style="color:${extras.native?.connected ? '#7ee787' : '#d29922'}">${extras.native?.connected ? '● CDP 持续采集已连接（不依赖页面 fetch 钩子）' : '○ 仅页面钩子；建议通过 --watch 启动持续采集'}</div>
         ${extras.native?.connected ? `<div class="ev">浏览器响应 ${extras.native.responses} · 已读 ${(extras.native.bytes / 1024).toFixed(1)} KB · 采集异常 ${extras.native.errors}</div>` : ''}
@@ -3129,10 +3103,6 @@ class HUD {
           <button class="pri" data-act="rescan">重新判定</button>
           <button data-act="dump">导出证据</button>
           <button data-act="export">导出指纹库</button>
-          <button data-act="toggle-notify" style="${extras.notifyEnabled ? 'border-color:#238636;color:#7ee787' : ''}">通知: ${extras.notifyEnabled ? '开启' : '关闭'}</button>
-          <button data-act="test-notify" title="发送一条测试系统通知">测试通知</button>
-          <button data-act="toggle-esc" style="${extras.autoEscEnabled ? 'border-color:#238636;color:#7ee787' : ''}">Esc: ${extras.autoEscEnabled ? '开启' : '关闭'}</button>
-          <button data-act="test-esc" title="模拟触发一次 Esc 键">测试 Esc</button>
         </div>
         <div class="log">${this.logs.join('')}</div>
       </div>`;
@@ -3156,905 +3126,11 @@ function esc(s) {
 
   exp.HUD = HUD;
 } };
-__mods["notifier"] = { fn: function (exp) {
-  var BUS = __req("interceptor").BUS;
-
-  const STORAGE_KEY = 'amp_session_notify_enabled';
-  const NOTIFY_ICON = 'data:image/svg+xml,' + encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
-    '<rect width="64" height="64" rx="14" fill="#1f6feb"/>' +
-    '<path d="M18 34l10 10 18-20" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' +
-    '</svg>'
-  );
-
-  let enabled = true;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved !== null) enabled = saved === 'true';
-    }
-  } catch { /* noop */ }
-
-  function isEnabled() { return enabled; }
-  function setEnabled(val) {
-    enabled = !!val;
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY, String(enabled));
-      }
-    } catch { /* noop */ }
-    return enabled;
-  }
-
-  const ESC_STORAGE_KEY = 'amp_session_auto_esc_enabled';
-  let autoEscEnabled = true;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const savedEsc = localStorage.getItem(ESC_STORAGE_KEY);
-      if (savedEsc !== null) autoEscEnabled = savedEsc === 'true';
-    }
-  } catch { /* noop */ }
-
-  function isAutoEscEnabled() { return autoEscEnabled; }
-  function setAutoEscEnabled(val) {
-    autoEscEnabled = !!val;
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(ESC_STORAGE_KEY, String(autoEscEnabled));
-      }
-    } catch { /* noop */ }
-    return autoEscEnabled;
-  }
-
-  function triggerEscapeKey() {
-    if (typeof window === 'undefined' && typeof document === 'undefined') return false;
-    try {
-      const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-      const target = (activeEl && activeEl !== document.body) ? activeEl : ((typeof document !== 'undefined' && (document.body || document.documentElement)) || window);
-
-      const eventInit = {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        which: 27,
-        charCode: 0,
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view: typeof window !== 'undefined' ? window : null,
-      };
-
-      const createKeyEvent = (type) => {
-        let evt = null;
-        if (typeof KeyboardEvent === 'function') {
-          try {
-            evt = new KeyboardEvent(type, eventInit);
-          } catch { /* noop */ }
-        }
-        if (!evt && typeof document !== 'undefined' && typeof document.createEvent === 'function') {
-          try {
-            evt = document.createEvent('KeyboardEvent');
-            if (typeof evt.initKeyboardEvent === 'function') {
-              evt.initKeyboardEvent(type, true, true, window, 'Escape', 0, '', false, '');
-            }
-          } catch { /* noop */ }
-        }
-        if (!evt && typeof Event === 'function') {
-          try {
-            evt = new Event(type, { bubbles: true, cancelable: true, composed: true });
-          } catch { /* noop */ }
-        }
-        if (!evt) {
-          evt = { type, ...eventInit };
-        }
-        try {
-          Object.defineProperty(evt, 'keyCode', { get: () => 27 });
-          Object.defineProperty(evt, 'which', { get: () => 27 });
-          Object.defineProperty(evt, 'key', { get: () => 'Escape' });
-          Object.defineProperty(evt, 'code', { get: () => 'Escape' });
-        } catch { /* noop */ }
-        return evt;
-      };
-
-      if (target && typeof target.dispatchEvent === 'function') {
-        target.dispatchEvent(createKeyEvent('keydown'));
-        target.dispatchEvent(createKeyEvent('keyup'));
-      }
-
-      // 如果目标不是 document / window，额外向 document 和 window 派发，确保全局监听（弹窗、下拉、快捷键）均能响应
-      if (typeof document !== 'undefined' && target !== document && target !== window) {
-        try {
-          document.dispatchEvent(createKeyEvent('keydown'));
-          document.dispatchEvent(createKeyEvent('keyup'));
-        } catch { /* noop */ }
-      }
-      if (typeof window !== 'undefined' && target !== window) {
-        try {
-          window.dispatchEvent(createKeyEvent('keydown'));
-          window.dispatchEvent(createKeyEvent('keyup'));
-        } catch { /* noop */ }
-      }
-
-      return true;
-    } catch (err) {
-      console.warn('[amp] 触发 Esc 键失败:', err);
-      return false;
-    }
-  }
-
-  function requestPermission() {
-    if (typeof Notification === 'undefined') return Promise.resolve('unsupported');
-    if (Notification.permission === 'granted') return Promise.resolve('granted');
-    if (Notification.permission === 'denied') return Promise.resolve('denied');
-    try {
-      const p = Notification.requestPermission();
-      if (p && typeof p.then === 'function') return p;
-    } catch { /* noop */ }
-    return Promise.resolve(Notification.permission);
-  }
-
-  // 页面交互时主动索取通知权限（规避部分浏览器对非用户手势 requestPermission 的拦截）
-  if (typeof document !== 'undefined') {
-    const onUserInteract = () => {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        requestPermission().catch(() => {});
-      }
-    };
-    document.addEventListener('click', onUserInteract, { capture: true, passive: true });
-    document.addEventListener('keydown', onUserInteract, { capture: true, passive: true });
-  }
-
-  // A longer, moderately louder completion chime; system notification audio stays silent.
-  async function playCompletionChime() {
-    let ctx;
-    const close = () => {
-      try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch { /* noop */ }
-    };
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      ctx = new AudioCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
-      const t = ctx.currentTime;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(523.25, t); // C5
-      osc.frequency.setValueAtTime(659.25, t + 0.35); // E5
-      osc.frequency.setValueAtTime(783.99, t + 0.70); // G5
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.linearRampToValueAtTime(0.20, t + 0.02);
-      gain.gain.setValueAtTime(0.20, t + 0.80);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.50);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.onended = close;
-      osc.start(t);
-      osc.stop(t + 1.50);
-    } catch { close(); /* Audio failure must not interrupt notifications or auto Esc. */ }
-  }
-
-  function flashTitle(badgeText = '回答完成', times = 4) {
-    if (typeof document === 'undefined') return;
-    const orig = document.title;
-    let count = 0;
-    const timer = setInterval(() => {
-      count++;
-      document.title = (count % 2 === 1) ? `【${badgeText}】${orig}` : orig;
-      if (count >= times * 2) {
-        clearInterval(timer);
-        document.title = orig;
-      }
-    }, 800);
-  }
-
-  function notify(title, body, meta = {}) {
-    if (!enabled) return false;
-
-    // 网页标题闪烁提醒
-    flashTitle('回答完成');
-    playCompletionChime();
-
-    if (typeof Notification === 'undefined') {
-      return false;
-    }
-
-    const doNotify = () => {
-      try {
-        const n = new Notification(title, {
-          body: body || '模型回答已生成完毕',
-          icon: NOTIFY_ICON,
-          tag: 'amp-session-end',
-          renotify: true,
-          silent: true,
-        });
-        n.onclick = function () {
-          try {
-            if (typeof window !== 'undefined') window.focus();
-          } catch { /* noop */ }
-          try { this.close(); } catch { /* noop */ }
-        };
-        return true;
-      } catch (err) {
-        console.warn('[amp] 系统通知弹出失败，保留音频提示:', err);
-        return false;
-      }
-    };
-
-    if (Notification.permission === 'granted') {
-      return doNotify();
-    } else if (Notification.permission === 'default') {
-      requestPermission().then(perm => {
-        if (perm === 'granted') doNotify();
-      }).catch(() => {});
-      return false;
-    } else {
-      // 通知权限被拒绝时，仍已播放上面的统一完成提示音
-      return false;
-    }
-  }
-
-  function testNotification() {
-    requestPermission().then(perm => {
-      if (perm === 'granted') {
-        notify(
-          'Arena 模型探针 · 系统通知测试',
-          '系统通知已就绪！当 Arena 会话回答完成时，将自动弹出桌面提醒。'
-        );
-      } else if (perm === 'denied') {
-        if (typeof alert === 'function') {
-          alert('系统通知权限已被拒绝。\n请点击浏览器地址栏左侧的网站设置，将「通知」权限改为「允许」。');
-        }
-      } else {
-        if (typeof alert === 'function') {
-          alert('未能获取系统通知权限（状态: ' + perm + '）');
-        }
-      }
-    });
-  }
-
-  function formatPayload(state) {
-    const verdict = state.lastVerdict || {};
-    const rs = (state.runState && state.runState()) || {};
-    const obs = state.lastObservation;
-    const slots = state.slots || {};
-
-    let title = 'Arena 会话已完成';
-    const slotKeys = Object.keys(slots);
-    if (slotKeys.length > 1) {
-      title = 'Arena 对战回答已完成';
-    }
-
-    let modelLine = '';
-    if (slotKeys.length > 1) {
-      const parts = slotKeys.map(s => {
-        const item = slots[s];
-        const name = item.label || item.modelId || '未知模型';
-        return `模型 ${s}: ${name}`;
-      });
-      modelLine = parts.join(' · ');
-    } else {
-      const realName = rs.modelName;
-      const verdictName = verdict.label || verdict.modelId;
-      const finalName = realName || verdictName || '未知模型';
-      const family = verdict.family ? ` (${verdict.family})` : '';
-      modelLine = `模型: ${finalName}${family}`;
-    }
-
-    const statParts = [];
-    if (obs && obs.totalMs != null && obs.totalMs > 0) {
-      statParts.push(`耗时 ${(obs.totalMs / 1000).toFixed(1)}s`);
-    }
-    if (obs && obs.completionTokens != null) {
-      let tokStr = `生成 ${obs.completionTokens} tokens`;
-      if (obs.reasoningTokens) tokStr += ` (思考 ${obs.reasoningTokens})`;
-      statParts.push(tokStr);
-    }
-    const statsLine = statParts.length ? statParts.join(' · ') : '';
-
-    const body = [modelLine, statsLine].filter(Boolean).join('\n') || '模型回答已生成完毕';
-    return { title, body, verdict, obs, slots };
-  }
-
-  function isDomGenerating() {
-    if (typeof document === 'undefined') return false;
-    try {
-      const visible = el => {
-        if (!el) return false;
-        try {
-          if (typeof el.getClientRects === 'function' && el.getClientRects().length === 0) return false;
-          if (typeof getComputedStyle === 'function' && getComputedStyle(el).visibility === 'hidden') return false;
-        } catch { /* noop */ }
-        return true;
-      };
-      const label = el => ((el.getAttribute && el.getAttribute('aria-label')) || el.textContent || '').trim().replace(/\s+/g, ' ');
-      const mains = (typeof document.querySelectorAll === 'function' ? [...document.querySelectorAll('main')] : []).filter(visible);
-      const root = mains[0] || document.body || document;
-      if (!root || typeof root.querySelectorAll !== 'function') return false;
-      const btns = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
-      return btns.some(b => {
-        const l = label(b);
-        const aria = (b.getAttribute && b.getAttribute('aria-label')) || '';
-        return /^(?:stop generating|stop|停止生成|停止)$/i.test(l) || /stop generating/i.test(aria);
-      });
-    } catch {
-      return false;
-    }
-  }
-
-  function initSessionWatcher(opts = {}) {
-    const { onSessionEnd } = opts;
-
-    let turnActive = false;
-    let turnGeneration = -1;
-    let turnStartTime = 0;
-    let hadContent = false;
-    let hadDomGenerating = false;
-    let lastNotifiedGeneration = -1;
-    let debounceTimer = null;
-
-    function onTurnStart(data) {
-      const gen = data?.generation || BUS.generation;
-      turnActive = true;
-      turnGeneration = gen;
-      turnStartTime = Date.now();
-      hadContent = false;
-      hadDomGenerating = false;
-      if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-    }
-
-    function checkCompletion(source) {
-      if (!turnActive) return;
-      if (turnGeneration <= 0) return;
-      if (lastNotifiedGeneration === turnGeneration) return;
-
-      // 必须有实际内容或曾出现过生成状态，避免未提问时误报
-      if (!hadContent && !hadDomGenerating && !isDomGenerating()) return;
-
-      // 若 DOM 仍处于生成中，继续等待
-      if (isDomGenerating()) {
-        hadDomGenerating = true;
-        if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-        return;
-      }
-
-      if (debounceTimer) return; // 已在防抖倒计时中，勿重复重置计时器
-
-      // 延迟防抖，避免多步骤、工具调用或网络微抖动造成的瞬间误判
-      debounceTimer = setTimeout(() => {
-        debounceTimer = null;
-        if (!turnActive || lastNotifiedGeneration === turnGeneration) return;
-        if (isDomGenerating()) {
-          hadDomGenerating = true;
-          return;
-        }
-
-        // 确认会话生成完毕
-        lastNotifiedGeneration = turnGeneration;
-        turnActive = false;
-        try {
-          if (typeof onSessionEnd === 'function') {
-            onSessionEnd({
-              generation: turnGeneration,
-              durationMs: Date.now() - turnStartTime,
-              source,
-            });
-          }
-        } catch (err) {
-          console.error('[amp] onSessionEnd error:', err);
-        }
-      }, 500);
-    }
-
-    // 监听网络层事件
-    BUS.on(evt => {
-      if (evt.kind === 'turn-start') {
-        onTurnStart(evt.data);
-      }
-      if (evt.kind === 'observation') {
-        hadContent = true;
-        if (!turnActive) {
-          onTurnStart({ generation: BUS.generation });
-          hadContent = true;
-        }
-        if (evt.data?.complete) {
-          checkCompletion('observation-complete');
-        }
-      }
-    });
-
-    // 监听 DOM 状态轮询作为可靠旁路（仅在生成状态结束边缘触发）
-    if (typeof document !== 'undefined') {
-      let wasDomGen = false;
-      setInterval(() => {
-        const domGen = isDomGenerating();
-        if (domGen) {
-          if (!turnActive) {
-            onTurnStart({ generation: BUS.generation });
-          }
-          hadDomGenerating = true;
-          wasDomGen = true;
-          if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-        } else if (wasDomGen) {
-          wasDomGen = false;
-          checkCompletion('dom-stop-gone');
-        }
-      }, 350);
-    }
-
-    return {
-      isGenerating: () => turnActive && (hadDomGenerating || isDomGenerating()),
-      forceCheck: (source) => checkCompletion(source || 'manual-check'),
-    };
-  }
-
-  exp.isEnabled = isEnabled;
-  exp.setEnabled = setEnabled;
-  exp.isAutoEscEnabled = isAutoEscEnabled;
-  exp.setAutoEscEnabled = setAutoEscEnabled;
-  exp.triggerEscapeKey = triggerEscapeKey;
-  exp.requestPermission = requestPermission;
-  exp.notify = notify;
-  exp.testNotification = testNotification;
-  exp.formatPayload = formatPayload;
-  exp.initSessionWatcher = initSessionWatcher;
-  exp.playCompletionChime = playCompletionChime;
-  exp.playFallbackChime = playCompletionChime; // Preserve the legacy export name.
-  exp.flashTitle = flashTitle;
-  exp.isDomGenerating = isDomGenerating;
-} };
-__mods["captcha-alert"] = { fn: function (exp) {
-  // Inspect only visible UI, never conversation text or cross-origin frame contents.
-  function visible(el) {
-    if (!el || el.closest('[hidden],[aria-hidden="true"],[role="log"]')) return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return false;
-    for (let p = el; p; p = p.parentElement) {
-      const s = getComputedStyle(p);
-      if (s.display === 'none' || s.visibility === 'hidden' || s.visibility === 'collapse' || Number(s.opacity) === 0) return false;
-    }
-    return true;
-  }
-  function detected() {
-    if (typeof document === 'undefined') return false;
-    const pattern = /security verification|verify (?:that )?you(?:'re| are) human|human verification|人机(?:身份)?验证|人机检测|安全验证/i;
-    for (const el of document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog[open]')) {
-      if (visible(el) && pattern.test(el.innerText || el.textContent || '')) return true;
-    }
-    for (const el of document.querySelectorAll('iframe[src]')) {
-      if (!visible(el)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 160 || rect.height < 80) continue;
-      try {
-        const u = new URL(el.getAttribute('src'), location.href);
-        if ((u.hostname === 'challenges.cloudflare.com' && /challenge|turnstile/i.test(u.pathname))
-          || (/(^|\.)(google\.com|recaptcha\.net)$/.test(u.hostname) && /\/recaptcha\/.*\/bframe/.test(u.pathname))
-          || (/(^|\.)hcaptcha\.com$/.test(u.hostname) && /challenge/i.test(u.href))) return true;
-      } catch { /* malformed frame URL */ }
-    }
-    return false;
-  }
-  async function playWarning() {
-    let ctx;
-    const close = () => { try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {} };
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      ctx = new AudioCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
-      const t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain();
-      osc.type = 'sine';
-      gain.gain.setValueAtTime(0.0001, t);
-      for (let i = 0; i < 3; i++) {
-        const at = t + i * 0.45;
-        osc.frequency.setValueAtTime(i % 2 ? 660 : 880, at);
-        gain.gain.setValueAtTime(0.0001, at);
-        gain.gain.linearRampToValueAtTime(0.22, at + 0.02);
-        gain.gain.setValueAtTime(0.22, at + 0.18);
-        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.30);
-      }
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.onended = close; osc.start(t); osc.stop(t + 1.25);
-    } catch { close(); }
-  }
-  function start({enabled = () => true, detect = detected, sound = playWarning} = {}) {
-    const key = '__AMP_CAPTCHA_WATCHER__';
-    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
-    window[key]?.stop?.();
-    let announced = false, misses = 0, stopped = false;
-    function check() {
-      if (stopped) return;
-      try {
-        if (!detect()) { if (++misses >= 2) announced = false; return; }
-        misses = 0;
-        if (!announced && enabled()) {
-          announced = true;
-          Promise.resolve(sound()).catch(() => {});
-        }
-      } catch { /* DOM/audio errors must not interfere with the page. */ }
-    }
-    const timer = setInterval(check, 750);
-    const api = {check, stop() { stopped = true; clearInterval(timer); }};
-    window[key] = api;
-    check();
-    return api;
-  }
-  exp.detected = detected;
-  exp.playWarning = playWarning;
-  exp.start = start;
-} };
-// BEGIN GENERATED PAGE BRIDGE
-__mods["page-bridge"] = { fn: function (exp) {
-  exp.ensure = () => {
-    const b = window.__arenaCompanion;
-    if (b?.pageRunnerProtocol === 'amp-keystrokes-v1'
-      && ['read','action','typeDraft','attachmentsReady'].every(k => typeof b[k] === 'function')) return b;
-    // Install locally: no fetch, eval, script element or dependence on the desktop injection order.
-(() => {
-  const visible = el => !!el && !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
-  const label = el => (el.getAttribute('aria-label') || el.textContent || '').trim().replace(/\s+/g, ' ');
-  const buttons = scope => [...scope.querySelectorAll('button')].filter(visible);
-  const find = (name, scope = document) => buttons(scope).find(e => label(e) === name);
-  const sidebarOpener = () => find('Expand sidebar') || find('Open sidebar');
-  const dialogs = () => [...document.querySelectorAll('[role="dialog"]')].filter(visible);
-  const termsDialog = () => {const matches=dialogs().filter(e=>/Terms of Use & Privacy Policy/.test(e.innerText));return matches.length===1?matches[0]:null;};
-  const termsButton = () => {const d=termsDialog();const matches=d?buttons(d).filter(e=>label(e)==='Agree'&&!e.disabled):[];return matches.length===1?matches[0]:null;};
-  const input = () => [...document.querySelectorAll('main div[contenteditable="true"]')].find(visible);
-  const stagedNames = main => main ? buttons(main).filter(e=>!e.closest('[role="log"]')).map(label).filter(t=>t.startsWith('Remove ')).map(t=>t.slice(7)) : [];
-  const loading = () => [...document.querySelectorAll('main [role=progressbar],main .animate-spin')].some(e=>visible(e)&&!e.closest('[role=log]'));
-  const writeDraft = value => {
-    const el=input();if(!el)throw new Error('输入框尚未就绪');el.focus();
-    const range=document.createRange();range.selectNodeContents(el);
-    const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
-    if(!document.execCommand('insertText',false,value))throw new Error('未能填入提示词');
-  };
-  const completion = log => {
-    const match = /^https:\/\/arena\.ai\/agent\/([0-9a-f-]{36})$/i.exec(location.href);
-    if (!log || !match) return null;
-    try {
-      let fiber = log[Object.keys(log).find(k => k.startsWith('__reactFiber'))];
-      const root = f => { for (let n=0; f?.return && n<150; n++) f=f.return; return f; };
-      let top=root(fiber);
-      if (top?.stateNode?.current && top !== top.stateNode.current) {
-        fiber=fiber?.alternate; top=root(fiber);
-        if (!top || (top.stateNode?.current && top !== top.stateNode.current)) return null;
-      }
-      for (let n=0; fiber && n<100; n++, fiber=fiber.return) {
-        const live=fiber.memoizedProps?.value;
-        if (!live || live.id!==match[1] || !Array.isArray(live.messages)) continue;
-        if (!['ready','submitted','streaming','error'].includes(live.status)) return null;
-        const last=live.messages[live.messages.length-1];
-        const parts=Array.isArray(last?.parts)?last.parts:typeof last?.content==='string'?[{type:'text',text:last.content}]:[];
-        const unfinished=last?.metadata?.pending===true || parts.some(p=>p &&
-          (p.state==='streaming' || ((p.type==='dynamic-tool' || p.type?.startsWith('tool-')) &&
-            !['output-available','output-error','output-denied','result'].includes(p.state))));
-        const answer=last?.role==='assistant' && parts.some(p=>p &&
-          ((p.type==='text' && typeof p.text==='string' && p.text.trim()) ||
-           ((p.type==='dynamic-tool' || p.type?.startsWith('tool-')) && ['output-available','output-error','output-denied','result'].includes(p.state))));
-        return {busy:['submitted','streaming'].includes(live.status)||unfinished,
-          complete:live.status==='ready' && !!answer && !unfinished, failed:live.status==='error'};
-      }
-    } catch (_) { /* Website shape changed: keep conservative DOM detection. */ }
-    return null;
-  };
-  const view = prompt => {
-    const main = [...document.querySelectorAll('main')].find(visible);
-    const log = main && [...main.querySelectorAll('[role="log"]')].find(visible);
-    const text = log?.innerText.trim() || '';
-    const dialog = dialogs()[0];
-    const challenge = dialogs().some(e=>/Security Verification|人机身份验证/.test(e.innerText));
-    const alerts = [...document.querySelectorAll('[role="alert"]')].filter(visible).map(e => e.innerText).join('\n');
-    const response = text.replace(prompt, '').trim();
-    const live = completion(log);
-    const stop = !!main && buttons(main).some(e=>label(e)==='Stop generating' && !e.closest('[role="log"]'));
-    const blocked = challenge ? '需要人机验证' :
-      find('Log In') || (dialog && /Log In to your account|Log In or Create Account/.test(dialog.innerText)) ? '请先登录 Arena' :
-      /too many requests|rate limit|try again later|quota exceeded|limit reached/i.test(alerts) ? '网站限流，请稍后继续' :
-      termsDialog() ? '正在处理网站首次使用条款' : '';
-    return {
-      url: location.href, main: !!main, conversation: !!text, promptConfirmed: !!prompt && text.includes(prompt),
-      thinking: !!log && buttons(log).some(e => /^(Thinking\b|Thought\b|思考|已思考)/i.test(label(e))),
-      generating: live ? live.busy || (!live.complete && stop) : stop,
-      generationKnown: !!live, responseComplete: !!live?.complete,
-      failed: !!live?.failed || /(?:^|\n)(?:Stopped|Generation stopped|Error|Something went wrong)(?:\n|$)/i.test(response),
-      response: response.length > 20 && !/^(finding|waiting|initializ|starting)/i.test(response),
-      responseSignature: response.length + ':' + Array.from(response.slice(-320)).slice(-160).join(''),
-      draft: input()?.innerText.trim() || '', editor: !!input(), blocker: blocked,
-      termsPending: !!termsButton() && blocked==='正在处理网站首次使用条款',
-      sendReady: !!main && !!find('Send message', main) && !find('Send message', main).disabled,
-      newLinks: [...document.querySelectorAll('a[href="/agent"]')].filter(e => visible(e) && label(e) === 'New Chat').length,
-      canExpand: !!sidebarOpener(),
-      attachmentNames: stagedNames(main),
-      conversationAttachments: log ? [...log.querySelectorAll('img')].filter(visible).map(e=>e.alt).filter(Boolean) : [],
-    };
-  };
-  window.__arenaCompanion = {
-    pageRunnerProtocol: 'amp-keystrokes-v1',
-    read: view,
-    attachmentsReady: names => {
-      if(!names.length)return true;
-      const main=[...document.querySelectorAll('main')].find(visible);
-      if(!main)return false;
-      const attached=stagedNames(main);
-      const busy=[...main.querySelectorAll('[role="progressbar"],.animate-spin')].some(visible);
-      return !busy&&attached.length===names.length&&names.every(name=>attached.includes(name));
-    },
-    replaceDraft: (expected,replacement) => {
-      const v=view(replacement);
-      if(!v.main||v.conversation||v.generating||!v.editor||v.draft!==expected)throw new Error('草稿与预期不同，已保留');
-      writeDraft(replacement);return {ok:true};
-    },
-    // Owned, incremental input used only by the explicit page-runner panel.
-    typeDraft: (expected, replacement, owner) => {
-      if (!owner || owner !== window.__AMP_GACHA_OWNER__) throw Error('网页抽卡未持有操作权');
-      if (typeof expected !== 'string' || typeof replacement !== 'string' || !replacement.startsWith(expected)
-        || Array.from(replacement).length > 1000) throw Error('输入参数不安全');
-      const v = view(replacement), gate = window.__MODEL_PROBE__?.gachaCooldown;
-      if (typeof gate !== 'function') return {waiting:true};
-      if (gate(false).remainingMs > 0) return {waiting:true};
-      if (!v.main || !v.editor || v.conversation || v.generating || v.blocker || dialogs().length
-        || window.__MODEL_PROBE__?.captchaDetected?.()) throw Error('页面未就绪或需要手动处理');
-      if (v.attachmentNames.length) throw Error('发现附件，已保留并暂停');
-      if (loading()) return {waiting:true, reason:'page-loading'};
-      if (v.draft !== expected.trim()) throw Error('草稿已被修改，已保留');
-      const delta=replacement.slice(expected.length);
-      if (Array.from(delta).length > 1) throw Error('每次只允许输入一个 Unicode 字符');
-      if (delta) {
-        const el=input();el.focus();
-        const range=document.createRange();range.selectNodeContents(el);range.collapse(false);
-        const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
-        const newline=delta==='\n' || delta==='\r';
-        const key=newline?'Enter':delta==='\t'?'Tab':delta;
-        const code=newline?'Enter':delta===' '?'Space':delta==='\t'?'Tab':
-          /^[a-z]$/i.test(delta)?'Key'+delta.toUpperCase():/^\d$/.test(delta)?'Digit'+delta:'';
-        const keyCode=newline?13:delta==='\t'?9:delta===' '?32:/^[a-z0-9]$/i.test(delta)?delta.toUpperCase().charCodeAt(0):0;
-        const event = type => new KeyboardEvent(type, {
-          key, code, bubbles:true, cancelable:true, composed:true, repeat:false,
-          // Shift+Enter prevents normal chat Enter-to-send handlers on multiline prompts.
-          shiftKey:newline || /^[A-Z]$/.test(delta),
-          keyCode:type==='keypress'?(newline?13:delta.length===1?delta.charCodeAt(0):0):keyCode,
-          charCode:type==='keypress'?(newline?13:delta.length===1?delta.charCodeAt(0):0):0,
-        });
-        try {
-          if (!el.dispatchEvent(event('keydown'))) throw Error('keydown 被页面取消，已暂停');
-          if (!el.dispatchEvent(event('keypress'))) throw Error('keypress 被页面取消，已暂停');
-          // Synthetic keyboard events are untrusted and do not insert text by themselves.
-          // Revalidate after handlers: never duplicate text inserted by a page listener.
-          const live=view(replacement);
-          if (owner!==window.__AMP_GACHA_OWNER__ || input()!==el || document.activeElement!==el
-            || location.href!==v.url || live.draft!==expected.trim() || live.conversation || live.generating
-            || live.blocker || live.attachmentNames.length || dialogs().length
-            || window.__MODEL_PROBE__?.captchaDetected?.() || gate(false).remainingMs>0)
-            throw Error('按键处理后页面或草稿改变，已保留并暂停');
-          if (loading()) return {waiting:true, reason:'page-loading'};
-          if (!document.execCommand('insertText',false,delta)) throw Error('逐字符输入失败');
-        } finally {
-          el.dispatchEvent(event('keyup'));
-        }
-      }
-      return {ok:true};
-    },
-    action: (name, prompt, gacha = false, owner = null) => {
-      const v = view(prompt);
-      if (gacha && ["new","fill","send","retryFill","retrySend","expand"].includes(name)) {
-        if (window.__AMP_GACHA_OWNER__ && owner !== window.__AMP_GACHA_OWNER__)
-          return {waiting:true, reason:"page-runner-active"};
-        if (owner && owner !== window.__AMP_GACHA_OWNER__) throw Error("网页抽卡操作权已失效");
-        if (owner && (v.blocker || dialogs().length || window.__MODEL_PROBE__?.captchaDetected?.()))
-          throw Error(v.blocker || "请先手动处理网页弹窗");
-      }
-      if (gacha) {
-        if (name==='new' && v.generating) return {waiting:true};
-        if (v.attachmentNames.length) throw Error('当前有附件，已保留；抽卡不会夹带附件');
-        if (loading()) return {waiting:true, reason:'page-loading'};
-        if (v.draft && (name==='new' || v.draft!==prompt)) throw Error('当前有其他草稿，已保留');
-        if (['new','fill','send','retryFill','retrySend'].includes(name)) {
-          const gate = window.__MODEL_PROBE__?.gachaCooldown;
-          if (typeof gate !== 'function') return {waiting:true, reason:'cooldown-probe-not-ready'};
-          const finished = v.responseComplete || (v.failed && !v.generating);
-          const {remainingMs} = gate(finished);
-          if (remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
-        }
-      }
-      if(name==='terms'||name==='dismissTerms') {
-        if(name==='terms'&&!v.termsPending)throw new Error('当前不能确认使用条款');
-        const dialog=termsDialog();
-        const b=name==='terms'?termsButton():dialog&&find('Close',dialog);
-        if(!b)throw new Error('当前没有待处理的使用条款窗口');b.click();return {ok:true};
-      }
-      const rateLimitRetry=name==='retryFill'||name==='retrySend';
-      if(rateLimitRetry&&termsDialog())throw new Error('使用条款尚未确认');
-      if (v.blocker&&!(rateLimitRetry&&v.blocker==='网站限流，请稍后继续')) throw new Error(v.blocker);
-      if(rateLimitRetry)name=name==='retryFill'?'fill':'send';
-      if (!v.main) throw new Error('页面尚未就绪');
-      if(name==='testFill'||name==='testSend') {
-        if(v.generating||!v.editor||dialogs().length)throw Error('请等待生成结束并关闭弹窗');
-        if(v.attachmentNames.length||[...document.querySelectorAll('main [role=progressbar],main .animate-spin')].some(e=>visible(e)&&!e.closest('[role=log]')))throw Error('当前有附件或上传未完成；请先移除，测试不会夹带附件');
-        if(v.draft&&v.draft!==prompt)throw Error('当前有其他草稿，已保留');
-        if(name==='testFill'){if(!v.draft)writeDraft(prompt);return {ok:true};}
-        const sends=buttons(document.querySelector('main')).filter(e=>label(e)==='Send message');
-        if(v.draft!==prompt||!v.sendReady||sends.length!==1||sends[0].disabled)throw Error('发送条件已改变');
-        sends[0].click();return {ok:true};
-      } else if (name === 'expand') {
-        const b = sidebarOpener(); if (b) b.click();
-      } else if (name === 'stop') {
-        const b = find('Stop generating', document.querySelector('main'));
-        if (b) b.click();
-      } else if (name === 'new') {
-        if (v.generating) throw new Error('请先停止当前生成');
-        const links = [...document.querySelectorAll('a[href="/agent"]')].filter(e => visible(e) && label(e) === 'New Chat');
-        if (links.length !== 1) throw new Error('请展开左侧栏，显示 New Chat 按钮');
-        links[0].click();
-      } else if (name === 'fill') {
-        if (v.conversation || v.generating || !v.editor) throw new Error('当前不是可填写的新对话');
-        if (v.draft && v.draft !== prompt) throw new Error('发现不同草稿，已保留，请自行处理');
-        if (!v.draft) {
-          writeDraft(prompt);
-        }
-      } else if (name === 'send') {
-        if(!window.__arenaCompanion.attachmentsReady(window.__arenaRequiredAttachments||[]))throw new Error('发送瞬间附件未确认，已暂停');
-        if (v.conversation || v.generating || v.draft !== prompt || !v.sendReady) throw new Error('发送前页面状态改变，已暂停');
-        find('Send message', document.querySelector('main')).click();
-      } else throw new Error('未知操作');
-      return {ok:true};
-    },
-  };
-})();
-    return window.__arenaCompanion;
-  };
-} };
-// END GENERATED PAGE BRIDGE
-__mods["gacha-runner"] = { fn: function (exp) {
-  const target = name => typeof name === 'string' && /astra|fable/i.test(name);
-  function create({bridge, info, blocked = () => false, now = () => performance.now(), random = Math.random,
-    claim = () => {}, release = () => {}, onChange = () => {}}) {
-    const owner = {};
-    let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始'}, prompt='', chars=[], typed='', due=0,
-      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false;
-    function report(message) { s.message=message; onChange({...s}); }
-    function pause(message) { s.status='paused'; report(message+'；已暂停，请处理后重新开始。'); }
-    function phase(name,delay=0,timeout=30000) { s.phase=name; due=now()+delay; deadline=now()+timeout; }
-    function stop() { s.status='stopped'; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
-    function start(value) {
-      if(s.status==='running') return false;
-      prompt=String(value||'').trim();
-      if(!prompt || Array.from(prompt).length>1000) throw Error('提示词需为 1–1000 个字符');
-      const b=bridge();if(!b?.typeDraft || !b?.action || !b?.read) throw Error('网页桥接未就绪，请刷新并确认 PageBridge 已加载');
-      const v=b.read(prompt);
-      if(v.generating || v.draft || v.attachmentNames?.length || v.blocker || blocked()) throw Error('请先处理生成、草稿、附件或验证/限流提示');
-      claim(owner); chars=Array.from(prompt); typed=''; gen=null; endedAt=null; expanded=false;
-      s={status:'running',phase:'prepare',round:0,model:'',message:'准备新对话；请勿同时运行桌面抽卡'};
-      phase('prepare',800);report(s.message);return true;
-    }
-    function action(name) {
-      const r=bridge().action(name,prompt,true,owner);
-      if(r?.waiting) { due=now()+500;return false; }
-      if(!r?.ok) throw Error('网页操作未确认：'+name);
-      return true;
-    }
-    function tick() {
-      if(s.status!=='running' || now()<due)return;
-      due=now()+250; // Non-typing states need no high-frequency DOM polling.
-      try {
-        const b=bridge();if(!b)throw Error('网页桥接丢失');
-        const v=b.read(prompt), f=info();
-        if(blocked() || v.blocker) {pause(v.blocker||'需要手动完成人机验证');return;}
-        if(v.attachmentNames?.length) {pause('检测到附件，保留现场');return;}
-        if(v.failed && s.phase==='answer') {pause('本轮生成失败');return;}
-        if(now()>deadline) {pause('等待页面、回答或模型名超时');return;}
-        if(gen!==null && f.generation===gen && f.modelUrl===v.url && target(f.model)) {
-          s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;
-        }
-        if(s.phase==='prepare' && gen!==null && v.url!==roundUrl){pause('准备下一轮时页面被切换');return;}
-        if(['typing','send'].includes(s.phase) && v.url!==editUrl) {pause('输入期间页面发生跳转');return;}
-        switch(s.phase) {
-          case 'prepare':
-            if(v.generating || v.draft) {pause('当前有生成或草稿，未覆盖');return;}
-            if(!v.main)return;
-            if(v.conversation) {
-              if(!v.newLinks && v.canExpand && !expanded){if(action('expand')){expanded=true;phase('prepare',800);}return;}
-              if(!action('new'))return;
-              expanded=false;
-              phase('opening',1000);report('等待新对话页面');
-            } else {editUrl=v.url;typed='';phase('typing',600,180000);report('逐字符输入提示词');}
-            break;
-          case 'opening':
-            if(!v.main || v.conversation || !v.editor || v.generating)return;
-            if(v.draft){pause('新对话已有草稿');return;}
-            editUrl=v.url;typed='';phase('typing',600,180000);report('逐字符输入提示词');break;
-          case 'typing': {
-            if(v.generating || v.conversation || v.draft!==typed.trim()){pause('页面或草稿被其他操作改变');return;}
-            if(!v.editor)return;
-            const next=chars.slice(0,Array.from(typed).length+1).join('');
-            const r=b.typeDraft(typed,next,owner);
-            if(r?.waiting){due=now()+500;return;}
-            if(!r?.ok)throw Error('输入未确认');
-            typed=next;due=now()+50+Math.floor(Math.max(0,Math.min(0.999999,random()))*101);
-            if(typed===prompt){phase('send',1000);report('输入完成，等待发送条件');}
-            break;
-          }
-          case 'send':
-            if(v.draft!==prompt || v.generating || v.conversation){pause('发送前页面或草稿改变');return;}
-            if(!v.sendReady)return;
-            baseGen=f.generation;gen=null;roundUrl=null;endedAt=null;
-            if(!action('send'))return;
-            s.round++;s.model='';phase('answer',500,240000);report('已发送，等待本轮真实模型名');break;
-          case 'answer':
-            if(gen===null){
-              if(f.generation<=baseGen)return;
-              if(f.generation!==baseGen+1){pause('检测到其他会话操作');return;}
-              if(!/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/i.test(v.url) || !v.promptConfirmed)return;
-              gen=f.generation;roundUrl=v.url;
-            }
-            if(f.generation!==gen || v.url!==roundUrl){pause('会话已切换，保留当前页面');return;}
-            if(f.model && f.modelUrl===v.url){
-              s.model=f.model;
-              if(target(f.model)) {s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;}
-            }
-            if(!v.generating && v.responseComplete){
-              if(endedAt===null){endedAt=now();report('回答完成，等待模型名与至少 10 秒冷却');}
-              if(now()-endedAt>120000 && !s.model){pause('未识别到本轮真实模型名');return;}
-              if(s.model && now()-endedAt>=10000){phase('prepare',800);report('未命中，准备下一轮');}
-            }
-            break;
-        }
-      } catch(e) {pause(e?.message||String(e));}
-    }
-    return {start,stop,tick,state:()=>({...s}),dispose:()=>{stop();}};
-  }
-  function mount({info, blocked}) {
-    if(typeof document==='undefined' || !document.body)return null;
-    window.__AMP_PAGE_GACHA__?.dispose?.();
-    const root=document.createElement('aside');root.id='amp-target-gacha';
-    root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。每轮至少等待10秒。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button> <button type="button" data-stop>停止</button>';
-    const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
-    const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
-      claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
-      onChange:s=>{status.textContent=`第 ${s.round} 轮 · ${s.message}`;startButton.disabled=s.status==='running';input.disabled=s.status==='running';}});
-    startButton.onclick=()=>{try{runner.start(input.value);}catch(e){status.textContent=e.message;}};
-    root.querySelector('[data-stop]').onclick=()=>runner.stop();
-    document.body.appendChild(root);
-    const timer=setInterval(runner.tick,25);
-    const api={start:runner.start,stop:runner.stop,state:runner.state,dispose(){clearInterval(timer);runner.dispose();root.remove();}};
-    window.__AMP_PAGE_GACHA__=api;return api;
-  }
-  exp.target=target;exp.create=create;exp.mount=mount;
-} };
-__mods["gacha-cooldown"] = { fn: function (exp) {
-  const WAIT_MS = 10000;
-  function createCooldown({now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout} = {}) {
-    let key = null, deadline = 0, timer = null;
-    const remaining = () => Math.max(0, Math.ceil(deadline - now()));
-    function cancel() { if (timer !== null) unschedule(timer); timer = null; }
-    function ended(nextKey) {
-      if (nextKey !== key) { cancel(); key = nextKey; deadline = now() + WAIT_MS; }
-      return remaining();
-    }
-    function afterWait(action, valid = () => true) {
-      cancel();
-      const expected = key;
-      const tick = () => {
-        timer = null;
-        if (key !== expected || !valid()) return;
-        const ms = remaining();
-        if (ms > 0) { timer = schedule(tick, ms); return; }
-        action();
-      };
-      timer = schedule(tick, remaining());
-    }
-    return {ended, remaining, afterWait, cancel};
-  }
-  exp.WAIT_MS = WAIT_MS;
-  exp.createCooldown = createCooldown;
-} };
 __mods["main"] = { fn: function (exp) {
-  var createCooldown = __req("gacha-cooldown").createCooldown;
-  var latestTraceSummary = __req("trace-summary").latestTraceSummary;
-  var desktopFacts = __req("trace-summary").desktopFacts;
-  var sanitizeDetail = __req("agent-detail").sanitizeDetail;
   var ingestNative = __req("native-capture").ingestNative;
   var nativeStatus = __req("native-capture").nativeStatus;
+  var latestTraceSummary = __req("trace-summary").latestTraceSummary;
+  var desktopFacts = __req("trace-summary").desktopFacts;
   var summarizeReasoning = __req("reasoning").summarizeReasoning;
   var BUS = __req("interceptor").BUS;
   var beginTurn = __req("interceptor").beginTurn;
@@ -4087,40 +3163,20 @@ __mods["main"] = { fn: function (exp) {
   var extractModelLabels = __req("runmodel").extractModelLabels;
   var HUD = __req("ui").HUD;
   var REGISTRY_VERSION = __req("registry").REGISTRY_VERSION;
-  var notifier = __req("notifier");
 /**
  * main.js — 编排入口
  *
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.9';
+const VERSION = '1.0.0+0a1993bf';
 function boot(opts = {}) {
-  const cooldown = createCooldown();
-  const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
   const cfg = {
     showHUD: false,
     learn: true,
     autoBackfillMs: 30000,
-    notifyOnFinish: true,
-    autoEscOnFinish: true,
     ...opts,
   };
-  if (typeof cfg.notifyOnFinish === 'boolean') {
-    notifier.setEnabled(cfg.notifyOnFinish);
-  }
-  if (typeof cfg.autoEscOnFinish === 'boolean') {
-    notifier.setAutoEscEnabled(cfg.autoEscOnFinish);
-  }
-
-  // Trace details are scoped to the current page, run and generation.
-  let desktopDetail = null;
-  const detailLive = () => {
-    const rs = runState(), url = location.origin + location.pathname;
-    const live = d => d && d.url === url && d.runId === rs.runId && d.generation === BUS.generation;
-    return live(rs.automaticTrace) ? rs.automaticTrace.summary : live(desktopDetail) ? desktopDetail.summary : null;
-  };
-  const currentFacts = () => desktopFacts(runState(), BUS.observations, BUS.evidence, detailLive());
 
   // 1) 先装钩子（越早越好，抢在页面自己的 fetch 之前）
   installFetchHook();
@@ -4143,27 +3199,6 @@ function boot(opts = {}) {
         copy(exportLearned());
         state.hud?.log('指纹库已复制到剪贴板');
       }
-      if (act === 'toggle-notify') {
-        const next = !notifier.isEnabled();
-        notifier.setEnabled(next);
-        state.hud?.log(`系统通知已${next ? '开启' : '关闭'}`);
-        recompute('notify-toggle');
-      }
-      if (act === 'test-notify') {
-        state.hud?.log('正在发送测试系统通知…');
-        notifier.testNotification();
-      }
-      if (act === 'toggle-esc') {
-        const next = !notifier.isAutoEscEnabled();
-        notifier.setAutoEscEnabled(next);
-        state.hud?.log(`会话结束自动 Esc 已${next ? '开启' : '关闭'}`);
-        recompute('esc-toggle');
-      }
-      if (act === 'test-esc') {
-        state.hud?.log('正在模拟触发 Esc 键…');
-        const ok = notifier.triggerEscapeKey();
-        state.hud?.log(ok ? 'Esc 键触发成功' : 'Esc 键触发失败');
-      }
     };
     state.hud?.log(`探针 v${VERSION} 已挂载，指纹库 ${REGISTRY_VERSION}`);
     state.hud?.log('等待页面发起对话请求…');
@@ -4185,7 +3220,8 @@ function boot(opts = {}) {
   // 流程：流里出现 public-access-token → 解出 run id → 轮询 run trace
   //       → 提取 ai.streamText.doStream span 的模型标签 → 回灌为最高权重证据。
   // 这样探针就能直接显示 qwen3.8-max-0902 这类真实模型名，而不只是"家族未知"。
-  startAutoResolve({ initialDelayMs: 8000, maxMs: 180000, intervalMs: 6000 });
+  // Short prompts resolve in a few seconds: start reading the trace early and back off adaptively.
+  startAutoResolve({ initialDelayMs: 2500, maxMs: 180000, intervalMs: 6000, firstIntervalMs: 1500 });
 
   BUS.on((evt) => {
     // ---- 第一环：接收流里下发的 token ----
@@ -4193,8 +3229,8 @@ function boot(opts = {}) {
     // 实测踩过的坑：interceptor 会发出 'stream-header' 事件，但这里
     // 没有监听者，导致 token 流到 BUS 就断了，acceptToken 从未被调用，
     // 于是永远读不到 run trace，HUD 只能显示"模型家族未知"。
-    if (evt.kind === 'turn-start') { cooldown.cancel(); beginRunTurn(evt.data?.url); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
-    if (evt.kind === 'diagnostic' || evt.kind === 'reasoning-detail') { recompute(evt.kind); return; }
+    if (evt.kind === 'turn-start') { beginRunTurn(evt.data?.url); state.lastObservation = null; state.lastVerdict = null; state.slots = {}; recompute('turn-start'); return; }
+    if (evt.kind === 'diagnostic') { recompute('diagnostic'); return; }
     if (evt.kind === 'stream-header') {
       const d = evt.data || {};
       try {
@@ -4334,10 +3370,7 @@ function boot(opts = {}) {
     if (state.hud) {
       const lastH = rs.modelHistory[rs.modelHistory.length - 1] || {};
       state.hud.render(verdict, {
-        notifyEnabled: notifier.isEnabled(),
-        autoEscEnabled: notifier.isAutoEscEnabled(),
-        reasoning: currentFacts().effort,
-        reasoningFacts: currentFacts(),
+        reasoning: summarizeReasoning(BUS.evidence),
         diagnostics: BUS.diagnostics,
         native: nativeStatus(),
         observation: state.lastObservation,
@@ -4353,26 +3386,6 @@ function boot(opts = {}) {
     return verdict;
   }
 
-  /* ---------------- 监听会话结束并弹出系统通知与自动触发 Esc ---------------- */
-  __req("captcha-alert").start({enabled: notifier.isEnabled});
-  notifier.initSessionWatcher({
-    onSessionEnd: (info) => {
-      recompute('session-end');
-      const payload = notifier.formatPayload({
-        ...state,
-        runState,
-      });
-      notifier.notify(payload.title, payload.body, info);
-
-      cooldown.ended(cooldownKey());
-      if (notifier.isAutoEscEnabled()) {
-        const ok = notifier.triggerEscapeKey();
-        state.hud?.log(ok ? '已自动触发 Esc；下一轮抽卡仍需等待冷却结束。' : 'Esc 触发失败；下一轮抽卡仍需等待冷却结束。');
-      }
-      state.hud?.log(`🔔 会话结束：${payload.title}；下一轮抽卡至少等待 10 秒。`);
-    },
-  });
-
   function quickVerdict(d) {
     const evidence = BUS.evidence.filter(e => e.url === d.url || e.modelId);
     return classify(evidence);
@@ -4386,32 +3399,23 @@ function boot(opts = {}) {
     }, cfg.autoBackfillMs);
   }
 
+  let desktopDetail = null;
+  const detailLive = () => runState().automaticTrace?.url===location.origin+location.pathname && runState().automaticTrace?.generation===BUS.generation ? runState().automaticTrace.summary : desktopDetail && desktopDetail.generation === BUS.generation && desktopDetail.runId === runState().runId && desktopDetail.url === location.origin+location.pathname ? desktopDetail.summary : null;
+
   // 暴露 API 给控制台/自动化
   const api = {
     version: VERSION,
-    captchaDetected: () => __req("captcha-alert").detected(),
-    // The bridge marks confirmed completion, then polls this same monotonic deadline.
-    gachaCooldown: (markEnded = false) => {
-      if (markEnded) cooldown.ended(cooldownKey());
-      return {remainingMs: cooldown.remaining(), waitMs: 10000};
-    },
     nativeCapture: (event) => ingestNative(event),
     nativeStatus: () => nativeStatus(),
     bus: BUS,
     hud: state.hud,
     state,
     classify: () => recompute('api'),
-    reasoning: () => currentFacts().effort,
-    desktopFacts: () => currentFacts(),
+    reasoning: () => desktopFacts(runState(),BUS.observations,BUS.evidence,detailLive()).effort,
+    desktopFacts: () => desktopFacts(runState(),BUS.observations,BUS.evidence,detailLive()),
     acceptTraceDetail: (context, detail) => {
-      if (!context || !/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/.test(context.url || '')
-        || context.url !== location.origin + location.pathname || context.runId !== runState().runId
-        || context.generation !== BUS.generation) return false;
-      const clean = sanitizeDetail(detail);
-      if (!clean) return false;
-      desktopDetail = {...context, summary: latestTraceSummary(clean)};
-      recompute('trace-detail');
-      return true;
+      if(!context || !/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/.test(context.url||'') || context.url!==location.origin+location.pathname || context.runId!==runState().runId || context.generation!==BUS.generation)return false;
+      desktopDetail={url:context.url,runId:context.runId,generation:context.generation,summary:latestTraceSummary(detail)};return true;
     },
     observations: () => BUS.observations,
     learned: () => listLearned(),
@@ -4449,45 +3453,11 @@ function boot(opts = {}) {
     realModels: () => listRealModels(),
     /** 手动记录一个真实模型名 */
     recordRealModel: (name, meta) => recordRealModel(name, meta),
-
-    // ---- 系统通知功能 ----
-    /** 发送系统通知（若通知开启且权限允许） */
-    notify: (title, body, meta) => notifier.notify(title, body, meta),
-    /** 发送一条测试系统通知，检验权限与系统提示效果 */
-    testNotification: () => notifier.testNotification(),
-    /** 开启或关闭会话结束系统通知 */
-    setNotificationEnabled: (val) => { const r = notifier.setEnabled(val); if (state.hud) recompute('notify-toggle'); return r; },
-    /** 查询会话结束系统通知当前是否开启 */
-    isNotificationEnabled: () => notifier.isEnabled(),
-
-    // ---- 会话结束自动触发 Esc 功能 ----
-    /** 手动触发一次 Esc 按键事件 */
-    triggerEsc: () => notifier.triggerEscapeKey(),
-    /** 开启或关闭会话结束自动触发 Esc 键 */
-    setAutoEscEnabled: (val) => { const r = notifier.setAutoEscEnabled(val); if (state.hud) recompute('esc-toggle'); return r; },
-    /** 查询会话结束自动触发 Esc 键当前是否开启 */
-    isAutoEscEnabled: () => notifier.isAutoEscEnabled(),
   };
   BUS.ready = true;
   for (const evt of BUS.pendingHeaders.splice(0)) BUS.emit(evt);
   recompute('boot');
   try { window.__MODEL_PROBE__ = api; } catch { /* noop */ }
-  const mountGacha = () => {
-    if (window.__MODEL_PROBE__ !== api) return;
-    try {
-      api.pageGacha = __req("gacha-runner").mount({
-        info: () => { const rs=runState(); return {generation:BUS.generation,model:rs.modelName || "",modelUrl:rs.tokenUrl}; },
-        blocked: () => __req("captcha-alert").detected(),
-      });
-    } catch (err) {
-      api.pageGacha = null;
-      console.warn('[amp] 网页抽卡面板初始化失败；探针其他功能仍可使用:', err);
-    }
-  };
-  if (typeof document !== 'undefined') {
-    if (document.body) mountGacha();
-    else document.addEventListener('DOMContentLoaded', mountGacha, {once:true});
-  }
   return api;
 }
 

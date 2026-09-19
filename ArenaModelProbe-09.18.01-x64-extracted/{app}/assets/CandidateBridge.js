@@ -15,7 +15,6 @@
  const renameMenuButton=()=>{
   const links=all('a[href]').filter(e=>new URL(e.href).pathname===location.pathname);
   if(!links.length)return {error:'当前对话在侧栏中不可见'};
-  if(links.length!==1)return {error:'当前对话在侧栏中不唯一'};
   links[0].scrollIntoView({block:'nearest'});
   for(let node=links[0].parentElement,depth=0;node&&depth<4;node=node.parentElement,depth++){
    const options=all('button',node).filter(e=>/^(More options|更多选项|更多)$/.test(label(e)));

@@ -9,7 +9,6 @@
   const termsButton = () => {const d=termsDialog();const matches=d?buttons(d).filter(e=>label(e)==='Agree'&&!e.disabled):[];return matches.length===1?matches[0]:null;};
   const input = () => [...document.querySelectorAll('main div[contenteditable="true"]')].find(visible);
   const stagedNames = main => main ? buttons(main).filter(e=>!e.closest('[role="log"]')).map(label).filter(t=>t.startsWith('Remove ')).map(t=>t.slice(7)) : [];
-  const loading = () => [...document.querySelectorAll('main [role=progressbar],main .animate-spin')].some(e=>visible(e)&&!e.closest('[role=log]'));
   const writeDraft = value => {
     const el=input();if(!el)throw new Error('输入框尚未就绪');el.focus();
     const range=document.createRange();range.selectNodeContents(el);
@@ -77,7 +76,6 @@
     };
   };
   window.__arenaCompanion = {
-    pageRunnerProtocol: 'amp-keystrokes-v1',
     read: view,
     attachmentsReady: names => {
       if(!names.length)return true;
@@ -92,77 +90,15 @@
       if(!v.main||v.conversation||v.generating||!v.editor||v.draft!==expected)throw new Error('草稿与预期不同，已保留');
       writeDraft(replacement);return {ok:true};
     },
-    // Owned, incremental input used only by the explicit page-runner panel.
-    typeDraft: (expected, replacement, owner) => {
-      if (!owner || owner !== window.__AMP_GACHA_OWNER__) throw Error('网页抽卡未持有操作权');
-      if (typeof expected !== 'string' || typeof replacement !== 'string' || !replacement.startsWith(expected)
-        || Array.from(replacement).length > 1000) throw Error('输入参数不安全');
-      const v = view(replacement), gate = window.__MODEL_PROBE__?.gachaCooldown;
-      if (typeof gate !== 'function') return {waiting:true};
-      if (gate(false).remainingMs > 0) return {waiting:true};
-      if (!v.main || !v.editor || v.conversation || v.generating || v.blocker || dialogs().length
-        || window.__MODEL_PROBE__?.captchaDetected?.()) throw Error('页面未就绪或需要手动处理');
-      if (v.attachmentNames.length) throw Error('发现附件，已保留并暂停');
-      if (loading()) return {waiting:true, reason:'page-loading'};
-      if (v.draft !== expected.trim()) throw Error('草稿已被修改，已保留');
-      const delta=replacement.slice(expected.length);
-      if (Array.from(delta).length > 1) throw Error('每次只允许输入一个 Unicode 字符');
-      if (delta) {
-        const el=input();el.focus();
-        const range=document.createRange();range.selectNodeContents(el);range.collapse(false);
-        const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
-        const newline=delta==='\n' || delta==='\r';
-        const key=newline?'Enter':delta==='\t'?'Tab':delta;
-        const code=newline?'Enter':delta===' '?'Space':delta==='\t'?'Tab':
-          /^[a-z]$/i.test(delta)?'Key'+delta.toUpperCase():/^\d$/.test(delta)?'Digit'+delta:'';
-        const keyCode=newline?13:delta==='\t'?9:delta===' '?32:/^[a-z0-9]$/i.test(delta)?delta.toUpperCase().charCodeAt(0):0;
-        const event = type => new KeyboardEvent(type, {
-          key, code, bubbles:true, cancelable:true, composed:true, repeat:false,
-          // Shift+Enter prevents normal chat Enter-to-send handlers on multiline prompts.
-          shiftKey:newline || /^[A-Z]$/.test(delta),
-          keyCode:type==='keypress'?(newline?13:delta.length===1?delta.charCodeAt(0):0):keyCode,
-          charCode:type==='keypress'?(newline?13:delta.length===1?delta.charCodeAt(0):0):0,
-        });
-        try {
-          if (!el.dispatchEvent(event('keydown'))) throw Error('keydown 被页面取消，已暂停');
-          if (!el.dispatchEvent(event('keypress'))) throw Error('keypress 被页面取消，已暂停');
-          // Synthetic keyboard events are untrusted and do not insert text by themselves.
-          // Revalidate after handlers: never duplicate text inserted by a page listener.
-          const live=view(replacement);
-          if (owner!==window.__AMP_GACHA_OWNER__ || input()!==el || document.activeElement!==el
-            || location.href!==v.url || live.draft!==expected.trim() || live.conversation || live.generating
-            || live.blocker || live.attachmentNames.length || dialogs().length
-            || window.__MODEL_PROBE__?.captchaDetected?.() || gate(false).remainingMs>0)
-            throw Error('按键处理后页面或草稿改变，已保留并暂停');
-          if (loading()) return {waiting:true, reason:'page-loading'};
-          if (!document.execCommand('insertText',false,delta)) throw Error('逐字符输入失败');
-        } finally {
-          el.dispatchEvent(event('keyup'));
-        }
-      }
-      return {ok:true};
-    },
-    action: (name, prompt, gacha = false, owner = null) => {
+    action: (name, prompt, gacha = false) => {
       const v = view(prompt);
-      if (gacha && ["new","fill","send","retryFill","retrySend","expand"].includes(name)) {
-        if (window.__AMP_GACHA_OWNER__ && owner !== window.__AMP_GACHA_OWNER__)
-          return {waiting:true, reason:"page-runner-active"};
-        if (owner && owner !== window.__AMP_GACHA_OWNER__) throw Error("网页抽卡操作权已失效");
-        if (owner && (v.blocker || dialogs().length || window.__MODEL_PROBE__?.captchaDetected?.()))
-          throw Error(v.blocker || "请先手动处理网页弹窗");
-      }
       if (gacha) {
         if (name==='new' && v.generating) return {waiting:true};
+        // Real staged attachments are the user's: never send them, stop the run.
         if (v.attachmentNames.length) throw Error('当前有附件，已保留；抽卡不会夹带附件');
-        if (loading()) return {waiting:true, reason:'page-loading'};
+        // A bare spinner without a staged file is the site loading (new chat, model routing), not an upload: wait, do not abort.
+        if ([...document.querySelectorAll('main [role=progressbar],main .animate-spin')].some(e=>visible(e)&&!e.closest('[role=log]'))) return {waiting:true};
         if (v.draft && (name==='new' || v.draft!==prompt)) throw Error('当前有其他草稿，已保留');
-        if (['new','fill','send','retryFill','retrySend'].includes(name)) {
-          const gate = window.__MODEL_PROBE__?.gachaCooldown;
-          if (typeof gate !== 'function') return {waiting:true, reason:'cooldown-probe-not-ready'};
-          const finished = v.responseComplete || (v.failed && !v.generating);
-          const {remainingMs} = gate(finished);
-          if (remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
-        }
       }
       if(name==='terms'||name==='dismissTerms') {
         if(name==='terms'&&!v.termsPending)throw new Error('当前不能确认使用条款');
