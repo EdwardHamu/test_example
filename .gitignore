@@ -48,3 +48,5 @@
 /.binary-backups/
 /.binary-update.lock/
 /.binary-restore-*/
+
+/Data
