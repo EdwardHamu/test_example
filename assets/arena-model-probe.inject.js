@@ -3683,6 +3683,117 @@ __mods["captcha-alert"] = { fn: function (exp) {
   exp.playWarning = playWarning;
   exp.start = start;
 } };
+__mods["choice-alert"] = { fn: function (exp) {
+  // Class tokens, not a full class string: order/spacing/margin changes do not matter.
+  const CARD_SELECTOR = '[data-agent-transcript-message] .flex.flex-col.rounded-md.border.border-border-faint.bg-surface-secondary[class~="max-w-[600px]"]';
+  const CONTROL_SELECTOR = 'button,[role="button"],input[type="radio"],input[type="checkbox"],select,[role="radio"],[role="checkbox"],[role="option"]';
+  const CHOICE_SELECTOR = 'input[type="radio"],input[type="checkbox"],select,[role="radio"],[role="checkbox"],[role="option"],[aria-pressed]';
+  function visible(el) {
+    if (!el || el.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    for (let p = el; p; p = p.parentElement) {
+      const s = getComputedStyle(p);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.visibility === 'collapse' || Number(s.opacity) === 0) return false;
+    }
+    return true;
+  }
+  function findPendingMessages() {
+    if (typeof document === 'undefined') return [];
+    const messages = new Set();
+    for (const card of document.querySelectorAll(CARD_SELECTOR)) {
+      if (card.closest('pre,code,#amp-hud') || !visible(card)) continue;
+      let buttons = 0;
+      for (const control of card.querySelectorAll(CONTROL_SELECTOR)) {
+        if (control.matches(':disabled') || control.closest('[aria-disabled="true"],[inert]') || !visible(control)) continue;
+        // A radio/checkbox/option is explicit; otherwise require multiple buttons
+        // so a similarly styled result card with only a Copy button stays silent.
+        if (control.matches(CHOICE_SELECTOR) || ++buttons >= 2) {
+          const message = card.closest('[data-agent-transcript-message]');
+          if (message) messages.add(message);
+          break;
+        }
+      }
+    }
+    return [...messages];
+  }
+  async function playChoice() {
+    let ctx, cleanupTimer, closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      clearTimeout(cleanupTimer);
+      try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {}
+    };
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      ctx = new AudioCtx();
+      // Also release a context if autoplay/resume stalls or onended never arrives.
+      cleanupTimer = setTimeout(close, 4000);
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (closed || ctx.state !== 'running') { close(); return; }
+      const t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.0001, t);
+      // Two descending "ding-dong" pairs, unlike completion's ascending triad
+      // and captcha's three high/low pulses.
+      for (const [offset, hz] of [[0, 698.46], [0.20, 523.25], [0.55, 698.46], [0.75, 523.25]]) {
+        const at = t + offset;
+        osc.frequency.setValueAtTime(hz, at);
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.linearRampToValueAtTime(0.18, at + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+      }
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.onended = close; osc.start(t); osc.stop(t + 1.02);
+    } catch { close(); }
+  }
+  function start({enabled = () => true, detect = findPendingMessages, sound = playChoice} = {}) {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return null;
+    const key = '__AMP_CHOICE_WATCHER__';
+    window[key]?.stop?.();
+    const states = new Map();
+    let stopped = false, route = '';
+    function check() {
+      if (stopped) return;
+      try {
+        const currentRoute = typeof location === 'undefined' ? '' : location.pathname;
+        if (route !== currentRoute) { states.clear(); route = currentRoute; }
+        const present = new Set();
+        for (const message of detect()) {
+          // Metadata IDs survive React replacement. Without an ID, track the
+          // message element, not individual card children or their text content.
+          const id = message.getAttribute('data-message-id') || message.id;
+          const identity = typeof id === 'string' && id.length > 0 && id.length <= 200 ? 'id:' + id : message;
+          present.add(identity);
+        }
+        for (const [identity, state] of states) {
+          if (!present.has(identity) && ++state.misses >= 2) states.delete(identity);
+        }
+        let announce = false;
+        for (const identity of present) {
+          let state = states.get(identity);
+          if (!state) { state = {announced: false, misses: 0}; states.set(identity, state); }
+          state.misses = 0;
+          if (!state.announced && enabled()) { state.announced = true; announce = true; }
+        }
+        // Several choice cards arriving together share one sound, not a chorus.
+        if (announce) Promise.resolve(sound()).catch(() => {});
+      } catch { /* UI/audio errors must not interrupt the host page. */ }
+    }
+    const timer = setInterval(check, 750);
+    const api = {check, stop() { stopped = true; clearInterval(timer); states.clear(); }};
+    window[key] = api;
+    check();
+    return api;
+  }
+  exp.CARD_SELECTOR = CARD_SELECTOR;
+  exp.findPendingMessages = findPendingMessages;
+  exp.detected = () => findPendingMessages().length > 0;
+  exp.playChoice = playChoice;
+  exp.start = start;
+} };
 // BEGIN GENERATED PAGE BRIDGE
 __mods["page-bridge"] = { fn: function (exp) {
   exp.ensure = () => {
@@ -4094,7 +4205,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.9';
+const VERSION = '1.2.4+assets-9.17.10';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
@@ -4355,6 +4466,7 @@ function boot(opts = {}) {
 
   /* ---------------- 监听会话结束并弹出系统通知与自动触发 Esc ---------------- */
   __req("captcha-alert").start({enabled: notifier.isEnabled});
+  __req("choice-alert").start({enabled: notifier.isEnabled});
   notifier.initSessionWatcher({
     onSessionEnd: (info) => {
       recompute('session-end');
@@ -4390,6 +4502,7 @@ function boot(opts = {}) {
   const api = {
     version: VERSION,
     captchaDetected: () => __req("captcha-alert").detected(),
+    choiceDetected: () => __req("choice-alert").detected(),
     // The bridge marks confirmed completion, then polls this same monotonic deadline.
     gachaCooldown: (markEnded = false) => {
       if (markEnded) cooldown.ended(cooldownKey());
