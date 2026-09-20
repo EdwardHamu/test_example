@@ -1319,7 +1319,8 @@ const BUS = {
   pendingHeaders: [],
   ready: false,
   generation: 0,
-  diagnostics: { heartbeats: 0, requests: 0, responses: 0, headers: 0 },
+  diagnostics: { heartbeats: 0, requests: 0, responses: 0, headers: 0, blocked: 0 },
+  pulseInfo: { pulse: 100, refreshedAt: null },
   evidence: [],      // 结构化证据
   observations: [],  // 每次完整对话的观测（用于指纹建档）
   listeners: [],
@@ -1393,6 +1394,26 @@ function inspectHeaders(headers, url) {
 const TELEMETRY_RE = /(?:datadoghq|datadog|posthog|sentry|amplitude|mixpanel|segment\.io|segment\.com|google-analytics|googletagmanager|hotjar|clarity\.ms|fullstory|logrocket|newrelic|nr-data|bugsnag|rollbar|trackjs|raygun|elastic\.co|honeycomb|lightstep|opentelemetry|otlp|statsig|launchdarkly|optimizely|split\.io|vwo\.com|matomo|plausible\.io|umami|vercel-insights|vercel\.com\/_vercel\/insights)/i;
 
 const IRRELEVANT_PATH_RE = /(?:rum\/|_vercel\/insights|\/cdn-cgi\/|\/survey|\/feedback\/|\/beacon|\/log\/|\/logs\/|\/metrics\/|\/trace\/|\/analytics|\/telemetry)/i;
+
+/* ------------------------------------------------------------------ *
+ * 请求阻断与去噪规则 (从 Arena Pro 反向迁移：拦截 Datadog / PostHog / Cloudflare Beacon / GA 等)
+ * ------------------------------------------------------------------ */
+const BLOCK_RULES = [
+  { name: 'Datadog RUM', match: (url) => url.includes('datadoghq.com') },
+  { name: 'PostHog Events', match: (url) => url.includes('/rpc/e/') || url.includes('/rpc/i/v0/e/') },
+  { name: 'PostHog Autocapture', match: (url) => url.includes('/rpc/static/exception-autocapture') || url.includes('/rpc/static/dead-clicks') || url.includes('/rpc/static/web-vitals') },
+  { name: 'PostHog Surveys', match: (url) => url.includes('/rpc/api/surveys/') },
+  { name: 'Cloudflare Beacon', match: (url) => url.includes('cloudflareinsights.com/beacon.min.js') },
+  { name: 'Google Analytics', match: (url) => url.includes('googletagmanager.com') || url.includes('google-analytics.com') }
+];
+
+function checkBlock(url) {
+  if (!url || typeof url !== 'string') return null;
+  for (const rule of BLOCK_RULES) {
+    if (rule.match(url)) return rule.name;
+  }
+  return null;
+}
 
 function isLikelyLLMUrl(url) {
   if (!url) return false;
@@ -1675,12 +1696,39 @@ function inferSlot() {
 }
 
 /* ------------------------------------------------------------------ *
+ * 主动拉取与监听用户精力值 (Pulse)
+ * ------------------------------------------------------------------ */
+let nativeFetch = null;
+async function fetchPulse() {
+  try {
+    const f = nativeFetch || (window.fetch && window.fetch.__orig) || window.fetch;
+    if (!f) return null;
+    const res = await f('/api/me/pulse', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && typeof data.pulse === 'number') {
+      BUS.pulseInfo = data;
+      BUS.emit({ kind: 'pulse-update', data });
+      return data;
+    }
+  } catch (e) {
+    /* ignore fetch error */
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ *
  * 安装 fetch 钩子
  * ------------------------------------------------------------------ */
 function installFetchHook() {
   let origFetch = window.fetch;
   if (!origFetch || origFetch.__probeOwner === BUS) return;
   while (origFetch.__probeWrapped && origFetch.__orig) origFetch = origFetch.__orig;
+  nativeFetch = origFetch;
   const wrapped = function (input, init) {
     let url = '', reqModel = null, reqHeaders = {};
     try {
@@ -1693,6 +1741,17 @@ function installFetchHook() {
       }
     } catch { /* noop */ }
 
+    // 【反向迁移：请求阻断去噪保护】
+    const blockRule = checkBlock(url);
+    if (blockRule) {
+      BUS.diagnostics.blocked = (BUS.diagnostics.blocked || 0) + 1;
+      console.log('%c[AMP Blocker]%c 已阻断噪音请求 (' + blockRule + '):', 'background:#ef4444;color:#fff;padding:1px 4px;border-radius:3px;', '', url);
+      return Promise.resolve(new Response(JSON.stringify({ blockedByArenaProbe: true, rule: blockRule }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }));
+    }
+
     const slot = inferSlot();
     const tStart = now();
     const p = origFetch.apply(this, arguments);
@@ -1700,6 +1759,16 @@ function installFetchHook() {
 
     return p.then((res) => {
       try {
+        const fullUrl = res.url || url || '';
+        if (fullUrl.includes('/api/me/pulse')) {
+          res.clone().json().then(data => {
+            if (data && typeof data.pulse === 'number') {
+              BUS.pulseInfo = data;
+              BUS.emit({ kind: 'pulse-update', data });
+            }
+          }).catch(() => {});
+        }
+
         const hdrs = headersToObj(res.headers);
         const ct = hdrs['content-type'] || '';
         if (!shouldInspect(res.url || url, ct)) return res;
@@ -1764,11 +1833,27 @@ function installXHRHook() {
   XO.__probeOwner = BUS;
 
   XO.prototype.open = function (method, url) {
-    this.__probeUrl = url;
+    this.__probeUrl = url ? url.toString() : '';
+    this.__isBlocked = !!checkBlock(this.__probeUrl);
     return origOpen.apply(this, arguments);
   };
   XO.prototype.send = function (body) {
     const url = this.__probeUrl || '';
+    if (this.__isBlocked) {
+      BUS.diagnostics.blocked = (BUS.diagnostics.blocked || 0) + 1;
+      console.log('%c[AMP Blocker]%c 已阻断 XHR 噪音请求:', 'background:#ef4444;color:#fff;padding:1px 4px;border-radius:3px;', '', url);
+      Object.defineProperty(this, 'readyState', { writable: true, value: 4 });
+      Object.defineProperty(this, 'status', { writable: true, value: 200 });
+      Object.defineProperty(this, 'responseText', { writable: true, value: '{"blocked":true}' });
+      setTimeout(() => {
+        try {
+          this.dispatchEvent(new Event('readystatechange'));
+          this.dispatchEvent(new Event('load'));
+          this.dispatchEvent(new Event('loadend'));
+        } catch { /* noop */ }
+      }, 0);
+      return;
+    }
     inspectRequest(body, url);
     const slot = inferSlot();
     // 注意：send 阶段拿不到响应头，所以不能在这里用内容类型过滤，
@@ -1864,12 +1949,37 @@ function installSocketHook() {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * 安装 sendBeacon 钩子 (反向迁移：拦截页面后台 beacon 遥测)
+ * ------------------------------------------------------------------ */
+function installBeaconHook() {
+  if (typeof navigator === 'undefined' || !navigator.sendBeacon) return;
+  if (navigator.sendBeacon.__probeOwner === BUS) return;
+  let origBeacon = navigator.sendBeacon.bind(navigator);
+  const wrappedBeacon = function (url, data) {
+    const urlStr = url ? url.toString() : '';
+    const blockRule = checkBlock(urlStr);
+    if (blockRule) {
+      BUS.diagnostics.blocked = (BUS.diagnostics.blocked || 0) + 1;
+      console.log('%c[AMP Blocker]%c 已阻断 Beacon 噪音上报 (' + blockRule + '):', 'background:#ef4444;color:#fff;padding:1px 4px;border-radius:3px;', '', urlStr);
+      return true;
+    }
+    return origBeacon(url, data);
+  };
+  wrappedBeacon.__probeOwner = BUS;
+  navigator.sendBeacon = wrappedBeacon;
+}
+
   exp.BUS = BUS;
   exp.beginTurn = beginTurn;
   exp.SSETap = SSETap;
   exp.installFetchHook = installFetchHook;
   exp.installXHRHook = installXHRHook;
   exp.installSocketHook = installSocketHook;
+  exp.installBeaconHook = installBeaconHook;
+  exp.checkBlock = checkBlock;
+  exp.BLOCK_RULES = BLOCK_RULES;
+  exp.fetchPulse = fetchPulse;
 } };
 __mods["idmap"] = { fn: function (exp) {
   var BUS = __req("interceptor").BUS;
@@ -3076,7 +3186,7 @@ class HUD {
 
     this.root.innerHTML = `
       <div class="hd"><span class="dot ${dotCls}"></span>
-        <span class="ttl">模型探针 · arena-model-probe</span>
+        <span class="ttl">模型探针 · arena-model-probe <span class="tag" style="padding:1px 5px;font-size:10px;border-radius:4px;background:rgba(56,139,253,0.15);color:#58a6ff;border:1px solid rgba(56,139,253,0.3);margin-left:4px;">⚡ ${extras.pulseInfo ? extras.pulseInfo.pulse + '%' : '100%'}</span></span>
         <span class="mini" data-act="toggle">—</span>
         <span class="mini" data-act="close">✕</span>
       </div>
@@ -3096,6 +3206,9 @@ class HUD {
           </div>
           ${vd.note ? `<div class="ev" style="opacity:.7">${esc(vd.note)}</div>` : ''}
         </div>
+        <div class="sec">额度与精力值 (Pulse)</div>
+        <div class="row"><span class="k">剩余精力值</span><span class="v" style="color:${(extras.pulseInfo?.pulse ?? 100) > 30 ? '#7ee787' : '#ff7b72'};font-weight:600">⚡ ${extras.pulseInfo ? extras.pulseInfo.pulse + '%' : '100%'}</span></div>
+        ${extras.pulseInfo?.refreshedAt ? `<div class="ev" style="opacity:.7">更新时间：${new Date(extras.pulseInfo.refreshedAt).toLocaleTimeString('zh-CN')}</div>` : ''}
         <div class="sec">推理强度 · 显式配置</div>
         <div class="row"><span class="k">档位</span><span class="v">${esc(reasoning.display || reasoning.level || '未知 / 未暴露')}</span></div>
         ${reasoning.budgetText ? `<div class="row"><span class="k">预算</span><span class="v">${esc(reasoning.budgetText)}（不换算为档位）</span></div>` : ''}
@@ -3112,7 +3225,7 @@ class HUD {
         <div class="ev" style="color:${extras.native?.connected ? '#7ee787' : '#d29922'}">${extras.native?.connected ? '● CDP 持续采集已连接（不依赖页面 fetch 钩子）' : '○ 仅页面钩子；建议通过 --watch 启动持续采集'}</div>
         ${extras.native?.connected ? `<div class="ev">浏览器响应 ${extras.native.responses} · 已读 ${(extras.native.bytes / 1024).toFixed(1)} KB · 采集异常 ${extras.native.errors}</div>` : ''}
         <div class="ev">${extras.observation ? '已采到回答帧；不保证包含模型或强度字段。' : '尚未采到有效回答帧。请发送新问题；若持续为空，请重新注入并刷新。'}</div>
-        <div class="ev">已过滤心跳 ${extras.diagnostics?.heartbeats || 0} · 有效响应 ${extras.diagnostics?.responses || 0}</div>
+        <div class="ev">已过滤心跳 ${extras.diagnostics?.heartbeats || 0} · 阻断请求 ${extras.diagnostics?.blocked || 0} · 有效响应 ${extras.diagnostics?.responses || 0}</div>
         ${slotHtml}
         ${extras.observation ? `<div class="sec">本次响应</div>
           <div class="row"><span class="k">首内容延迟</span><span class="v">${extras.observation.ttftMs == null ? '未测得' : extras.observation.ttftMs + ' ms'}</span></div>
@@ -3148,6 +3261,218 @@ class HUD {
   }
 }
 
+class PulseFloatingWidget {
+  constructor(root = document.documentElement, opts = {}) {
+    const existing = document.getElementById('amp-pulse-widget');
+    if (existing) existing.remove();
+
+    this.host = document.createElement('div');
+    this.host.id = 'amp-pulse-widget';
+    this.shadow = this.host.attachShadow({ mode: 'open' });
+    this.onRefresh = opts.onRefresh || null;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      :host { all: initial; }
+      .pill {
+        position: fixed;
+        z-index: 2147483646;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px 6px 12px;
+        border-radius: 9999px;
+        background: rgba(13, 17, 23, 0.94);
+        color: #e6edf3;
+        border: 1px solid rgba(56, 139, 253, 0.45);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 12px rgba(56, 139, 253, 0.2);
+        backdrop-filter: blur(12px);
+        font: 12px/1.4 "SF Mono", ui-monospace, Consolas, monospace;
+        cursor: move;
+        user-select: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+      }
+      .pill:hover {
+        border-color: rgba(56, 139, 253, 0.85);
+        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 139, 253, 0.35);
+      }
+      .icon {
+        font-size: 15px;
+        line-height: 1;
+        color: #fbbf24;
+        filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
+        animation: pulse-glow 2s infinite ease-in-out;
+      }
+      @keyframes pulse-glow {
+        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.5)); }
+        50% { transform: scale(1.18); filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.85)); }
+      }
+      .lbl {
+        font-size: 11px;
+        color: #8b949e;
+        font-weight: 500;
+        letter-spacing: 0.3px;
+      }
+      .val {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        min-width: 36px;
+      }
+      .bar-bg {
+        width: 38px;
+        height: 6px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.12);
+        overflow: hidden;
+      }
+      .bar-fill {
+        height: 100%;
+        width: 100%;
+        border-radius: 3px;
+        transition: width 0.4s ease, background-color 0.4s ease;
+      }
+      .btn-refresh {
+        cursor: pointer;
+        opacity: 0.65;
+        padding: 0 2px;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.2s, transform 0.25s, color 0.2s;
+      }
+      .btn-refresh:hover {
+        opacity: 1;
+        color: #58a6ff;
+      }
+      .spinning {
+        animation: spin 0.65s linear infinite;
+      }
+      @keyframes spin {
+        100% { transform: rotate(360deg); }
+      }
+    `;
+    this.shadow.appendChild(style);
+
+    this.pill = document.createElement('div');
+    this.pill.className = 'pill';
+    this.pill.innerHTML = `
+      <span class="icon">⚡</span>
+      <span class="lbl">精力值</span>
+      <span class="val" data-val>100%</span>
+      <div class="bar-bg"><div class="bar-fill" data-bar style="width:100%;background:#22c55e;"></div></div>
+      <span class="btn-refresh" data-refresh title="点击刷新精力值">↻</span>
+    `;
+    this.shadow.appendChild(this.pill);
+    root.appendChild(this.host);
+
+    this.valEl = this.pill.querySelector('[data-val]');
+    this.barEl = this.pill.querySelector('[data-bar]');
+    this.refreshBtn = this.pill.querySelector('[data-refresh]');
+
+    this._initPosition();
+    this._initEvents();
+  }
+
+  _initPosition() {
+    let pos = null;
+    try {
+      const saved = localStorage.getItem('amp_pulse_pos');
+      if (saved) pos = JSON.parse(saved);
+    } catch {}
+
+    if (pos && typeof pos.top === 'number' && typeof pos.left === 'number') {
+      this.pill.style.top = `${Math.max(8, Math.min(window.innerHeight - 40, pos.top))}px`;
+      this.pill.style.left = `${Math.max(8, Math.min(window.innerWidth - 180, pos.left))}px`;
+      this.pill.style.right = 'auto';
+    } else {
+      // 默认位置：页面右上，HUD 左侧
+      if (window.innerWidth > 800) {
+        this.pill.style.top = '16px';
+        this.pill.style.right = '390px';
+      } else {
+        this.pill.style.top = '14px';
+        this.pill.style.left = '50%';
+        this.pill.style.transform = 'translateX(-50%)';
+      }
+    }
+  }
+
+  _initEvents() {
+    let isDragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    this.pill.addEventListener('mousedown', (e) => {
+      if (e.target === this.refreshBtn) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = this.pill.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      this.pill.style.right = 'auto';
+      this.pill.style.transform = 'none';
+
+      const onMove = (ev) => {
+        if (!isDragging) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        const newLeft = Math.max(8, Math.min(window.innerWidth - rect.width - 8, startLeft + dx));
+        const newTop = Math.max(8, Math.min(window.innerHeight - rect.height - 8, startTop + dy));
+        this.pill.style.left = `${newLeft}px`;
+        this.pill.style.top = `${newTop}px`;
+      };
+
+      const onUp = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        try {
+          const rect = this.pill.getBoundingClientRect();
+          localStorage.setItem('amp_pulse_pos', JSON.stringify({ top: rect.top, left: rect.left }));
+        } catch {}
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    if (this.refreshBtn) {
+      this.refreshBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.refreshBtn.classList.add('spinning');
+        if (typeof this.onRefresh === 'function') {
+          Promise.resolve(this.onRefresh()).finally(() => {
+            setTimeout(() => this.refreshBtn.classList.remove('spinning'), 500);
+          });
+        } else {
+          setTimeout(() => this.refreshBtn.classList.remove('spinning'), 500);
+        }
+      });
+    }
+  }
+
+  update(pulseInfo) {
+    if (!pulseInfo) return;
+    const pulse = typeof pulseInfo.pulse === 'number' ? pulseInfo.pulse : 100;
+    const color = pulse > 50 ? '#22c55e' : pulse > 20 ? '#f59e0b' : '#ef4444';
+    if (this.valEl) {
+      this.valEl.textContent = `${pulse}%`;
+      this.valEl.style.color = color;
+    }
+    if (this.barEl) {
+      this.barEl.style.width = `${Math.max(0, Math.min(100, pulse))}%`;
+      this.barEl.style.backgroundColor = color;
+    }
+    const timeStr = pulseInfo.refreshedAt ? new Date(pulseInfo.refreshedAt).toLocaleTimeString('zh-CN') : '刚刚';
+    this.pill.setAttribute('title', `⚡ 剩余精力值: ${pulse}%\n上次更新: ${timeStr}\n(按住可拖拽，点击 ↻ 立即刷新)`);
+  }
+
+  dispose() {
+    try { this.host.remove(); } catch {}
+  }
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -3155,6 +3480,7 @@ function esc(s) {
 }
 
   exp.HUD = HUD;
+  exp.PulseFloatingWidget = PulseFloatingWidget;
 } };
 __mods["notifier"] = { fn: function (exp) {
   var BUS = __req("interceptor").BUS;
@@ -3332,6 +3658,34 @@ __mods["notifier"] = { fn: function (exp) {
       osc.start(t);
       osc.stop(t + 1.50);
     } catch { close(); /* Audio failure must not interrupt notifications or auto Esc. */ }
+  }
+
+  // 抽卡命中目标模型时播放的欢快大调和弦升音 (C5 -> E5 -> G5 -> C6)
+  async function playHitChime() {
+    let ctx;
+    const close = () => { try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {} };
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      ctx = new AudioCtx();
+      if (ctx.state === 'suspended') await ctx.resume();
+      const t0 = ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+        const t = t0 + idx * 0.12;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(0.18, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.45);
+      });
+      setTimeout(close, 1200);
+    } catch { close(); }
   }
 
   function flashTitle(badgeText = '回答完成', times = 4) {
@@ -3599,6 +3953,7 @@ __mods["notifier"] = { fn: function (exp) {
   exp.formatPayload = formatPayload;
   exp.initSessionWatcher = initSessionWatcher;
   exp.playCompletionChime = playCompletionChime;
+  exp.playHitChime = playHitChime;
   exp.playFallbackChime = playCompletionChime; // Preserve the legacy export name.
   exp.flashTitle = flashTitle;
   exp.isDomGenerating = isDomGenerating;
@@ -4016,6 +4371,7 @@ __mods["page-bridge"] = { fn: function (exp) {
 } };
 // END GENERATED PAGE BRIDGE
 __mods["gacha-runner"] = { fn: function (exp) {
+  var BUS = __req("interceptor").BUS;
   const target = name => typeof name === 'string' && /astra|fable/i.test(name);
   function create({bridge, info, blocked = () => false, now = () => performance.now(), random = Math.random,
     claim = () => {}, release = () => {}, onChange = () => {}}) {
@@ -4028,6 +4384,9 @@ __mods["gacha-runner"] = { fn: function (exp) {
     function stop() { s.status='stopped'; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
     function start(value) {
       if(s.status==='running') return false;
+      if (BUS?.pulseInfo && typeof BUS.pulseInfo.pulse === 'number' && BUS.pulseInfo.pulse <= 0) {
+        throw Error('用户精力值 (Pulse) 已耗尽，无法开始抽卡');
+      }
       prompt=String(value||'').trim();
       if(!prompt || Array.from(prompt).length>1000) throw Error('提示词需为 1–1000 个字符');
       const b=bridge();if(!b?.typeDraft || !b?.action || !b?.read) throw Error('网页桥接未就绪，请刷新并确认 PageBridge 已加载');
@@ -4049,12 +4408,18 @@ __mods["gacha-runner"] = { fn: function (exp) {
       try {
         const b=bridge();if(!b)throw Error('网页桥接丢失');
         const v=b.read(prompt), f=info();
+        if(BUS?.pulseInfo && typeof BUS.pulseInfo.pulse === 'number' && BUS.pulseInfo.pulse <= 0) {
+          pause('用户精力值 (Pulse) 已耗尽');
+          return;
+        }
         if(blocked() || v.blocker) {pause(v.blocker||'需要手动完成人机验证');return;}
         if(v.attachmentNames?.length) {pause('检测到附件，保留现场');return;}
         if(v.failed && s.phase==='answer') {pause('本轮生成失败');return;}
         if(now()>deadline) {pause('等待页面、回答或模型名超时');return;}
         if(gen!==null && f.generation===gen && f.modelUrl===v.url && target(f.model)) {
-          s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;
+          s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
+          try { __req("notifier").playHitChime(); } catch {}
+          return;
         }
         if(s.phase==='prepare' && gen!==null && v.url!==roundUrl){pause('准备下一轮时页面被切换');return;}
         if(['typing','send'].includes(s.phase) && v.url!==editUrl) {pause('输入期间页面发生跳转');return;}
@@ -4100,7 +4465,11 @@ __mods["gacha-runner"] = { fn: function (exp) {
             if(f.generation!==gen || v.url!==roundUrl){pause('会话已切换，保留当前页面');return;}
             if(f.model && f.modelUrl===v.url){
               s.model=f.model;
-              if(target(f.model)) {s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');return;}
+              if(target(f.model)) {
+                s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
+                try { __req("notifier").playHitChime(); } catch {}
+                return;
+              }
             }
             if(!v.generating && v.responseComplete){
               if(endedAt===null){endedAt=now();report('回答完成，等待模型名与至少 10 秒冷却');}
@@ -4172,6 +4541,8 @@ __mods["main"] = { fn: function (exp) {
   var installFetchHook = __req("interceptor").installFetchHook;
   var installXHRHook = __req("interceptor").installXHRHook;
   var installSocketHook = __req("interceptor").installSocketHook;
+  var installBeaconHook = __req("interceptor").installBeaconHook;
+  var fetchPulse = __req("interceptor").fetchPulse;
   var classify = __req("classify").classify;
   var learnFromObservation = __req("learned").learnFromObservation;
   var listLearned = __req("learned").listLearned;
@@ -4197,6 +4568,7 @@ __mods["main"] = { fn: function (exp) {
   var runReset = __req("runmodel").reset;
   var extractModelLabels = __req("runmodel").extractModelLabels;
   var HUD = __req("ui").HUD;
+  var PulseFloatingWidget = __req("ui").PulseFloatingWidget;
   var REGISTRY_VERSION = __req("registry").REGISTRY_VERSION;
   var notifier = __req("notifier");
 /**
@@ -4205,12 +4577,13 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.10';
+const VERSION = '1.2.4+assets-9.17.13-pulse-float';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
   const cfg = {
-    showHUD: false,
+    showHUD: true,
+    showPulseWidget: true,
     learn: true,
     autoBackfillMs: 30000,
     notifyOnFinish: true,
@@ -4237,8 +4610,58 @@ function boot(opts = {}) {
   installFetchHook();
   installXHRHook();
   installSocketHook();
+  installBeaconHook();
 
-  const state = { hud: null, lastVerdict: null, lastObservation: null, slots: {}, t0: performance.now() };
+  // 主动拉取与定时同步用户精力值 (Pulse)
+  try {
+    fetchPulse();
+    setInterval(fetchPulse, 60000);
+  } catch {}
+
+  // ---------------- 自动问候 (Auto Greeting) ----------------
+  const GREETING_KEY = 'amp_auto_greeting_enabled';
+  const GREETING_PROMPT_KEY = 'amp_auto_greeting_prompt';
+  let autoGreeting = false;
+  let greetingPrompt = '只回答数字1，不要补充其他文字。';
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const g = localStorage.getItem(GREETING_KEY);
+      if (g !== null) autoGreeting = g === 'true';
+      const p = localStorage.getItem(GREETING_PROMPT_KEY);
+      if (p) greetingPrompt = p;
+    }
+  } catch {}
+
+  let lastGreetingUrl = '';
+  setInterval(() => {
+    if (!autoGreeting) return;
+    const path = location.pathname;
+    if (path !== '/agent' && path !== '/agent/') return;
+    if (lastGreetingUrl === location.href) return;
+    const main = document.querySelector('main');
+    if (!main) return;
+    const messages = main.querySelectorAll('[role="log"], [data-agent-transcript-message]');
+    if (messages.length > 0 && messages[0].innerText.trim()) return;
+    try {
+      const bridge = __req("page-bridge").ensure();
+      const v = bridge.read('');
+      if (v.main && v.editor && !v.draft && !v.generating && !v.conversation) {
+        bridge.replaceDraft('', greetingPrompt);
+        lastGreetingUrl = location.href;
+        state.hud?.log('已自动填入问候提示词');
+      }
+    } catch {}
+  }, 1500);
+
+  const state = { hud: null, pulseWidget: null, lastVerdict: null, lastObservation: null, slots: {}, t0: performance.now() };
+
+  // 独立悬浮精力值浮窗（fixed 浮窗，直接在页面悬浮呈现，可拖拽）
+  if (cfg.showPulseWidget !== false && typeof document !== 'undefined' && document.documentElement) {
+    state.pulseWidget = new PulseFloatingWidget(document.documentElement, {
+      onRefresh: () => fetchPulse(),
+    });
+    if (BUS.pulseInfo) state.pulseWidget.update(BUS.pulseInfo);
+  }
 
   if (cfg.showHUD && typeof document !== 'undefined' && document.documentElement) {
     state.hud = new HUD(document.documentElement);
@@ -4368,6 +4791,10 @@ function boot(opts = {}) {
       state.lastObservation = evt.data;
       recompute('observation');
     }
+    if (evt.kind === 'pulse-update') {
+      if (state.pulseWidget) state.pulseWidget.update(evt.data || BUS.pulseInfo);
+      if (state.hud) recompute('pulse');
+    }
   });
 
   /* ---------------- 完整判定 + 建档 ---------------- */
@@ -4450,6 +4877,7 @@ function boot(opts = {}) {
         reasoning: currentFacts().effort,
         reasoningFacts: currentFacts(),
         diagnostics: BUS.diagnostics,
+        pulseInfo: BUS.pulseInfo,
         native: nativeStatus(),
         observation: state.lastObservation,
         learnedSummary,
@@ -4461,6 +4889,9 @@ function boot(opts = {}) {
         runInfo: rs.runId ? { runId: rs.runId, reason: rs.lastError } : null,
       });
     }
+    if (state.pulseWidget && BUS.pulseInfo) {
+      state.pulseWidget.update(BUS.pulseInfo);
+    }
     return verdict;
   }
 
@@ -4469,6 +4900,7 @@ function boot(opts = {}) {
   __req("choice-alert").start({enabled: notifier.isEnabled});
   notifier.initSessionWatcher({
     onSessionEnd: (info) => {
+      fetchPulse();
       recompute('session-end');
       const payload = notifier.formatPayload({
         ...state,
@@ -4580,6 +5012,36 @@ function boot(opts = {}) {
     setAutoEscEnabled: (val) => { const r = notifier.setAutoEscEnabled(val); if (state.hud) recompute('esc-toggle'); return r; },
     /** 查询会话结束自动触发 Esc 键当前是否开启 */
     isAutoEscEnabled: () => notifier.isAutoEscEnabled(),
+
+    // ---- 用户精力值 (Pulse) 与额度接口 ----
+    /** 获取当前用户精力值状态对象 { pulse: number, refreshedAt: string } */
+    pulseInfo: () => BUS.pulseInfo,
+    /** 手动触发一次用户精力值刷新请求 (/api/me/pulse) */
+    fetchPulse: () => fetchPulse(),
+
+    // ---- 自动问候功能 ----
+    /** 开启或关闭进入新会话自动填入问候提示词 */
+    setAutoGreetingEnabled: (val) => {
+      autoGreeting = !!val;
+      try { localStorage.setItem(GREETING_KEY, String(autoGreeting)); } catch {}
+      return autoGreeting;
+    },
+    isAutoGreetingEnabled: () => autoGreeting,
+    setGreetingPrompt: (val) => {
+      greetingPrompt = String(val || '');
+      try { localStorage.setItem(GREETING_PROMPT_KEY, greetingPrompt); } catch {}
+      return greetingPrompt;
+    },
+    getGreetingPrompt: () => greetingPrompt,
+
+    // ---- 智能音效播放与测试 ----
+    playCompletionChime: () => notifier.playCompletionChime(),
+    playHitChime: () => notifier.playHitChime(),
+    playWarningChime: () => __req("captcha-alert").playWarning?.(),
+    playChoiceChime: () => __req("choice-alert").playChoice?.(),
+
+    // ---- 独立悬浮精力值浮窗 ----
+    pulseWidget: () => state.pulseWidget,
   };
   BUS.ready = true;
   for (const evt of BUS.pendingHeaders.splice(0)) BUS.emit(evt);
@@ -4661,7 +5123,7 @@ if (typeof window !== 'undefined') {
     ? window.__MODEL_PROBE__.version : null;
 
   // Network hooks must run before page scripts retain native fetch / create streams.
-  if (prevVersion !== VERSION) { installFetchHook(); installXHRHook(); installSocketHook(); }
+  if (prevVersion !== VERSION) { installFetchHook(); installXHRHook(); installSocketHook(); installBeaconHook(); }
   // 同版本重复注入 → 直接跳过，避免叠加监听
   if (prevBooted === VERSION && prevVersion === VERSION) {
     // no-op：已是最新版本
@@ -4674,6 +5136,8 @@ if (typeof window !== 'undefined') {
       try {
         const old = document.getElementById('amp-hud');
         if (old) old.remove();
+        const oldWidget = document.getElementById('amp-pulse-widget');
+        if (oldWidget) oldWidget.remove();
       } catch { /* noop */ }
     }
     const start = () => {
