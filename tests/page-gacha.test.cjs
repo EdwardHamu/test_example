@@ -21,11 +21,37 @@ test('explicit start, incremental Unicode-safe input and delayed send',()=>{
 for(const model of ['astra-preview','FABLE-latest'])test('target '+model+' stops next rounds but preserves generating answer',()=>{
  const e=setup();e.runner.start('你好');e.until('answer');e.facts.model=model;e.step(500);assert.equal(e.runner.state().status,'matched');e.step(30000);assert.deepEqual(e.calls.map(x=>x.name),['send']);assert.equal(e.v.generating,true);
 });
-test('non-target waits at least ten seconds after completion then opens next round',()=>{
- const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.facts.model='other-model';e.v.generating=false;e.v.responseComplete=true;e.step();const end=e.time();e.step(9999);assert.equal(e.calls.filter(x=>x.name==='new').length,0);e.step(1);e.until('opening');assert.equal(e.calls.at(-1).name,'new');assert.ok(e.calls.at(-1).at-end>=10000);e.until('answer');assert.equal(e.runner.state().round,2);
+test('non-target opens next round immediately without waiting 10 seconds',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.facts.model='other-model';e.v.generating=false;e.v.responseComplete=true;e.step();const end=e.time();e.step(800);e.until('opening');assert.equal(e.calls.at(-1).name,'new');assert.ok(e.calls.at(-1).at-end<2000);e.until('answer');assert.equal(e.runner.state().round,2);
 });
-test('late target during next-round preparation still prevents new chat',()=>{
- const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.facts.model='other';e.v.generating=false;e.v.responseComplete=true;e.step();e.step(10000);e.facts.model='astra-late';e.step(800);assert.equal(e.runner.state().status,'matched');assert.equal(e.calls.length,1);
+test('late target during answer completes as match without starting next round',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();assert.equal(e.calls.filter(x=>x.name==='new').length,0);e.facts.model='astra-late';e.step(500);assert.equal(e.runner.state().status,'matched');assert.equal(e.calls.length,1);
+});
+test('webpage popup waits 5 seconds up to 5 times, then resumes if popup closes',()=>{
+ const e=setup();e.runner.start('你好');e.until('typing');
+ e.v.hasDialog=true;e.step(600);
+ assert.equal(e.runner.state().status,'running');
+ assert.equal(e.runner.state().dialogRetries,1);
+ assert.match(e.runner.state().message,/第 1\/5 次/);
+ e.step(5000);
+ assert.equal(e.runner.state().status,'running');
+ assert.equal(e.runner.state().dialogRetries,2);
+ assert.match(e.runner.state().message,/第 2\/5 次/);
+ e.v.hasDialog=false;e.step(5000);
+ assert.equal(e.runner.state().status,'running');
+ assert.equal(e.runner.state().dialogRetries,0);
+});
+test('webpage popup pauses after 5 failed waits of 5 seconds',()=>{
+ const e=setup();e.runner.start('你好');e.until('typing');
+ e.v.hasDialog=true;
+ for(let i=1;i<=5;i++){
+   e.step(i===1?600:5000);
+   assert.equal(e.runner.state().status,'running');
+   assert.equal(e.runner.state().dialogRetries,i);
+ }
+ e.step(5000);
+ assert.equal(e.runner.state().status,'paused');
+ assert.match(e.runner.state().message,/未消失/);
 });
 test('unknown model never causes blind next-round retry; eventually pauses',()=>{
  const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();e.step(120001);assert.equal(e.runner.state().status,'paused');assert.equal(e.calls.length,1);

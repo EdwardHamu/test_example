@@ -4,7 +4,7 @@
   const buttons = scope => [...scope.querySelectorAll('button')].filter(visible);
   const find = (name, scope = document) => buttons(scope).find(e => label(e) === name);
   const sidebarOpener = () => find('Expand sidebar') || find('Open sidebar');
-  const dialogs = () => [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+  const dialogs = () => [...document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog[open]')].filter(visible);
   const termsDialog = () => {const matches=dialogs().filter(e=>/Terms of Use & Privacy Policy/.test(e.innerText));return matches.length===1?matches[0]:null;};
   const termsButton = () => {const d=termsDialog();const matches=d?buttons(d).filter(e=>label(e)==='Agree'&&!e.disabled):[];return matches.length===1?matches[0]:null;};
   const input = () => [...document.querySelectorAll('main div[contenteditable="true"]')].find(visible);
@@ -74,11 +74,13 @@
       canExpand: !!sidebarOpener(),
       attachmentNames: stagedNames(main),
       conversationAttachments: log ? [...log.querySelectorAll('img')].filter(visible).map(e=>e.alt).filter(Boolean) : [],
+      hasDialog: dialogs().length > 0,
     };
   };
   window.__arenaCompanion = {
     pageRunnerProtocol: 'amp-keystrokes-v1',
     read: view,
+    hasDialog: () => dialogs().length > 0,
     attachmentsReady: names => {
       if(!names.length)return true;
       const main=[...document.querySelectorAll('main')].find(visible);
@@ -148,7 +150,9 @@
         if (window.__AMP_GACHA_OWNER__ && owner !== window.__AMP_GACHA_OWNER__)
           return {waiting:true, reason:"page-runner-active"};
         if (owner && owner !== window.__AMP_GACHA_OWNER__) throw Error("网页抽卡操作权已失效");
-        if (owner && (v.blocker || dialogs().length || window.__MODEL_PROBE__?.captchaDetected?.()))
+        if (owner && (dialogs().length || v.hasDialog))
+          return {waiting:true, reason:"dialog-present"};
+        if (owner && (v.blocker || window.__MODEL_PROBE__?.captchaDetected?.()))
           throw Error(v.blocker || "请先手动处理网页弹窗");
       }
       if (gacha) {
@@ -160,8 +164,8 @@
           const gate = window.__MODEL_PROBE__?.gachaCooldown;
           if (typeof gate !== 'function') return {waiting:true, reason:'cooldown-probe-not-ready'};
           const finished = v.responseComplete || (v.failed && !v.generating);
-          const {remainingMs} = gate(finished);
-          if (remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
+          const {remainingMs} = gate(owner ? false : finished);
+          if (!owner && remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
         }
       }
       if(name==='terms'||name==='dismissTerms') {

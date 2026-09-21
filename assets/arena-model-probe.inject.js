@@ -4162,7 +4162,7 @@ __mods["page-bridge"] = { fn: function (exp) {
   const buttons = scope => [...scope.querySelectorAll('button')].filter(visible);
   const find = (name, scope = document) => buttons(scope).find(e => label(e) === name);
   const sidebarOpener = () => find('Expand sidebar') || find('Open sidebar');
-  const dialogs = () => [...document.querySelectorAll('[role="dialog"]')].filter(visible);
+  const dialogs = () => [...document.querySelectorAll('[role="dialog"],[role="alertdialog"],dialog[open]')].filter(visible);
   const termsDialog = () => {const matches=dialogs().filter(e=>/Terms of Use & Privacy Policy/.test(e.innerText));return matches.length===1?matches[0]:null;};
   const termsButton = () => {const d=termsDialog();const matches=d?buttons(d).filter(e=>label(e)==='Agree'&&!e.disabled):[];return matches.length===1?matches[0]:null;};
   const input = () => [...document.querySelectorAll('main div[contenteditable="true"]')].find(visible);
@@ -4232,11 +4232,13 @@ __mods["page-bridge"] = { fn: function (exp) {
       canExpand: !!sidebarOpener(),
       attachmentNames: stagedNames(main),
       conversationAttachments: log ? [...log.querySelectorAll('img')].filter(visible).map(e=>e.alt).filter(Boolean) : [],
+      hasDialog: dialogs().length > 0,
     };
   };
   window.__arenaCompanion = {
     pageRunnerProtocol: 'amp-keystrokes-v1',
     read: view,
+    hasDialog: () => dialogs().length > 0,
     attachmentsReady: names => {
       if(!names.length)return true;
       const main=[...document.querySelectorAll('main')].find(visible);
@@ -4306,7 +4308,9 @@ __mods["page-bridge"] = { fn: function (exp) {
         if (window.__AMP_GACHA_OWNER__ && owner !== window.__AMP_GACHA_OWNER__)
           return {waiting:true, reason:"page-runner-active"};
         if (owner && owner !== window.__AMP_GACHA_OWNER__) throw Error("网页抽卡操作权已失效");
-        if (owner && (v.blocker || dialogs().length || window.__MODEL_PROBE__?.captchaDetected?.()))
+        if (owner && (dialogs().length || v.hasDialog))
+          return {waiting:true, reason:"dialog-present"};
+        if (owner && (v.blocker || window.__MODEL_PROBE__?.captchaDetected?.()))
           throw Error(v.blocker || "请先手动处理网页弹窗");
       }
       if (gacha) {
@@ -4318,8 +4322,8 @@ __mods["page-bridge"] = { fn: function (exp) {
           const gate = window.__MODEL_PROBE__?.gachaCooldown;
           if (typeof gate !== 'function') return {waiting:true, reason:'cooldown-probe-not-ready'};
           const finished = v.responseComplete || (v.failed && !v.generating);
-          const {remainingMs} = gate(finished);
-          if (remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
+          const {remainingMs} = gate(owner ? false : finished);
+          if (!owner && remainingMs > 0) return {waiting:true, reason:'session-cooldown', remainingMs};
         }
       }
       if(name==='terms'||name==='dismissTerms') {
@@ -4373,15 +4377,19 @@ __mods["page-bridge"] = { fn: function (exp) {
 __mods["gacha-runner"] = { fn: function (exp) {
   var BUS = __req("interceptor").BUS;
   const target = name => typeof name === 'string' && /astra|fable/i.test(name);
+  // Secondary targets do not stop the loop; a hit only lengthens the post-round wait.
+  const secondary = name => typeof name === 'string' && !target(name) && /sol|opus|glm[\s._-]*5[\s._-]*3|gemini/i.test(name);
+  const ROUND_WAIT_MS = 0, SECONDARY_WAIT_MS = 40000;
+  const roundWait = name => secondary(name) ? SECONDARY_WAIT_MS : ROUND_WAIT_MS;
   function create({bridge, info, blocked = () => false, now = () => performance.now(), random = Math.random,
     claim = () => {}, release = () => {}, onChange = () => {}}) {
     const owner = {};
-    let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始'}, prompt='', chars=[], typed='', due=0,
-      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false;
-    function report(message) { s.message=message; onChange({...s}); }
-    function pause(message) { s.status='paused'; report(message+'；已暂停，请处理后重新开始。'); }
+    let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始',dialogRetries:0}, prompt='', chars=[], typed='', due=0,
+      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false, dialogRetries=0;
+    function report(message) { s.message=message; s.dialogRetries=dialogRetries; onChange({...s}); }
+    function pause(message) { s.status='paused'; s.dialogRetries=dialogRetries; report(message+'；已暂停，请处理后重新开始。'); }
     function phase(name,delay=0,timeout=30000) { s.phase=name; due=now()+delay; deadline=now()+timeout; }
-    function stop() { s.status='stopped'; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
+    function stop() { s.status='stopped'; dialogRetries=0; s.dialogRetries=0; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
     function start(value) {
       if(s.status==='running') return false;
       if (BUS?.pulseInfo && typeof BUS.pulseInfo.pulse === 'number' && BUS.pulseInfo.pulse <= 0) {
@@ -4391,16 +4399,42 @@ __mods["gacha-runner"] = { fn: function (exp) {
       if(!prompt || Array.from(prompt).length>1000) throw Error('提示词需为 1–1000 个字符');
       const b=bridge();if(!b?.typeDraft || !b?.action || !b?.read) throw Error('网页桥接未就绪，请刷新并确认 PageBridge 已加载');
       const v=b.read(prompt);
-      if(v.generating || v.draft || v.attachmentNames?.length || v.blocker || blocked()) throw Error('请先处理生成、草稿、附件或验证/限流提示');
-      claim(owner); chars=Array.from(prompt); typed=''; gen=null; endedAt=null; expanded=false;
-      s={status:'running',phase:'prepare',round:0,model:'',message:'准备新对话；请勿同时运行桌面抽卡'};
+      if(v.generating || v.draft || v.attachmentNames?.length || v.hasDialog || v.blocker || blocked()) throw Error('请先处理生成、草稿、附件或验证/限流提示');
+      claim(owner); chars=Array.from(prompt); typed=''; gen=null; endedAt=null; expanded=false; dialogRetries=0;
+      s={status:'running',phase:'prepare',round:0,model:'',message:'准备新对话；请勿同时运行桌面抽卡',dialogRetries:0};
       phase('prepare',800);report(s.message);return true;
     }
     function action(name) {
-      const r=bridge().action(name,prompt,true,owner);
-      if(r?.waiting) { due=now()+500;return false; }
-      if(!r?.ok) throw Error('网页操作未确认：'+name);
-      return true;
+      try {
+        const r=bridge().action(name,prompt,true,owner);
+        if(r?.waiting) {
+          if(r.reason==='dialog-present') {
+            if(dialogRetries<5) {
+              dialogRetries++;
+              due=now()+5000;
+              deadline=Math.max(deadline,now()+30000);
+              report('遇到网页弹窗，等待 5 秒确认是否消失（第 '+dialogRetries+'/5 次）');
+              return false;
+            }
+            throw Error('遇到网页弹窗，已等待 5 次未消失');
+          }
+          due=now()+500;return false;
+        }
+        if(!r?.ok) throw Error('网页操作未确认：'+name);
+        return true;
+      } catch(err) {
+        if(/弹窗|dialog/i.test(err?.message||'')) {
+          if(dialogRetries<5) {
+            dialogRetries++;
+            due=now()+5000;
+            deadline=Math.max(deadline,now()+30000);
+            report('遇到网页弹窗，等待 5 秒确认是否消失（第 '+dialogRetries+'/5 次）');
+            return false;
+          }
+          throw Error('遇到网页弹窗，已等待 5 次未消失');
+        }
+        throw err;
+      }
     }
     function tick() {
       if(s.status!=='running' || now()<due)return;
@@ -4411,6 +4445,23 @@ __mods["gacha-runner"] = { fn: function (exp) {
         if(BUS?.pulseInfo && typeof BUS.pulseInfo.pulse === 'number' && BUS.pulseInfo.pulse <= 0) {
           pause('用户精力值 (Pulse) 已耗尽');
           return;
+        }
+        const hasDialog = !!(v.hasDialog || (typeof b.hasDialog === 'function' && b.hasDialog()) || (v.blocker && /弹窗|dialog/i.test(v.blocker)));
+        if (hasDialog) {
+          if (dialogRetries < 5) {
+            dialogRetries++;
+            due = now() + 5000;
+            deadline = Math.max(deadline, now() + 30000);
+            report('遇到网页弹窗，等待 5 秒确认是否消失（第 ' + dialogRetries + '/5 次）');
+            return;
+          }
+          pause('遇到网页弹窗，已等待 5 次未消失');
+          dialogRetries = 0;
+          return;
+        }
+        if (dialogRetries > 0) {
+          dialogRetries = 0;
+          s.dialogRetries = 0;
         }
         if(blocked() || v.blocker) {pause(v.blocker||'需要手动完成人机验证');return;}
         if(v.attachmentNames?.length) {pause('检测到附件，保留现场');return;}
@@ -4442,8 +4493,39 @@ __mods["gacha-runner"] = { fn: function (exp) {
             if(v.generating || v.conversation || v.draft!==typed.trim()){pause('页面或草稿被其他操作改变');return;}
             if(!v.editor)return;
             const next=chars.slice(0,Array.from(typed).length+1).join('');
-            const r=b.typeDraft(typed,next,owner);
-            if(r?.waiting){due=now()+500;return;}
+            let r;
+            try {
+              r=b.typeDraft(typed,next,owner);
+            } catch(err) {
+              if(/弹窗|dialog/i.test(err?.message||'')) {
+                if(dialogRetries<5) {
+                  dialogRetries++;
+                  due=now()+5000;
+                  deadline=Math.max(deadline,now()+30000);
+                  report('遇到网页弹窗，等待 5 秒确认是否消失（第 '+dialogRetries+'/5 次）');
+                  return;
+                }
+                pause('遇到网页弹窗，已等待 5 次未消失');
+                dialogRetries=0;
+                return;
+              }
+              throw err;
+            }
+            if(r?.waiting){
+              if(r.reason==='dialog-present') {
+                if(dialogRetries<5) {
+                  dialogRetries++;
+                  due=now()+5000;
+                  deadline=Math.max(deadline,now()+30000);
+                  report('遇到网页弹窗，等待 5 秒确认是否消失（第 '+dialogRetries+'/5 次）');
+                  return;
+                }
+                pause('遇到网页弹窗，已等待 5 次未消失');
+                dialogRetries=0;
+                return;
+              }
+              due=now()+500;return;
+            }
             if(!r?.ok)throw Error('输入未确认');
             typed=next;due=now()+50+Math.floor(Math.max(0,Math.min(0.999999,random()))*101);
             if(typed===prompt){phase('send',1000);report('输入完成，等待发送条件');}
@@ -4464,21 +4546,43 @@ __mods["gacha-runner"] = { fn: function (exp) {
             }
             if(f.generation!==gen || v.url!==roundUrl){pause('会话已切换，保留当前页面');return;}
             if(f.model && f.modelUrl===v.url){
+              const firstSeen=!s.model;
               s.model=f.model;
               if(target(f.model)) {
                 s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
                 try { __req("notifier").playHitChime(); } catch {}
                 return;
               }
+              if(firstSeen && secondary(f.model)) report('次要目标 '+f.model+'，本轮结束后等待 40 秒再继续');
             }
             if(!v.generating && v.responseComplete){
-              if(endedAt===null){endedAt=now();report('回答完成，等待模型名与至少 10 秒冷却');}
+              if(endedAt===null){
+                endedAt=now();
+                report(secondary(s.model)?'回答完成（次要目标 '+s.model+'），等待 40 秒冷却':(s.model?'回答完成，未命中，准备下一轮':'回答完成，等待真实模型名'));
+              }
               if(now()-endedAt>120000 && !s.model){pause('未识别到本轮真实模型名');return;}
-              if(s.model && now()-endedAt>=10000){phase('prepare',800);report('未命中，准备下一轮');}
+              if(s.model && now()-endedAt>=roundWait(s.model)){
+                phase('prepare',800);
+                report(secondary(s.model)?'次要目标 '+s.model+' 已等待 40 秒，准备下一轮':'未命中，准备下一轮');
+              }
             }
             break;
         }
-      } catch(e) {pause(e?.message||String(e));}
+      } catch(e) {
+        if(/弹窗|dialog/i.test(e?.message||'')) {
+          if(dialogRetries<5) {
+            dialogRetries++;
+            due=now()+5000;
+            deadline=Math.max(deadline,now()+30000);
+            report('遇到网页弹窗，等待 5 秒确认是否消失（第 '+dialogRetries+'/5 次）');
+            return;
+          }
+          pause('遇到网页弹窗，已等待 5 次未消失');
+          dialogRetries=0;
+          return;
+        }
+        pause(e?.message||String(e));
+      }
     }
     return {start,stop,tick,state:()=>({...s}),dispose:()=>{stop();}};
   }
@@ -4487,7 +4591,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     window.__AMP_PAGE_GACHA__?.dispose?.();
     const root=document.createElement('aside');root.id='amp-target-gacha';
     root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。每轮至少等待10秒。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button> <button type="button" data-stop>停止</button>';
+    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / GLM5.3 / gemini 不停止，等待40秒再继续。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
     const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
     const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
@@ -4499,7 +4603,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     const api={start:runner.start,stop:runner.stop,state:runner.state,dispose(){clearInterval(timer);runner.dispose();root.remove();}};
     window.__AMP_PAGE_GACHA__=api;return api;
   }
-  exp.target=target;exp.create=create;exp.mount=mount;
+  exp.target=target;exp.secondary=secondary;exp.roundWait=roundWait;exp.create=create;exp.mount=mount;
 } };
 __mods["gacha-cooldown"] = { fn: function (exp) {
   const WAIT_MS = 10000;
@@ -4900,7 +5004,7 @@ function boot(opts = {}) {
   __req("choice-alert").start({enabled: notifier.isEnabled});
   notifier.initSessionWatcher({
     onSessionEnd: (info) => {
-      fetchPulse();
+      if (typeof fetchPulse === 'function') fetchPulse();
       recompute('session-end');
       const payload = notifier.formatPayload({
         ...state,
