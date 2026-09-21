@@ -4568,6 +4568,10 @@ __mods["gacha-runner"] = { fn: function (exp) {
   const secondary = name => typeof name === 'string' && !target(name) && /sol|opus|glm[\s._-]*5[\s._-]*3|gemini/i.test(name);
   const ROUND_WAIT_MS = 0, SECONDARY_WAIT_MS = 40000;
   const roundWait = name => secondary(name) ? SECONDARY_WAIT_MS : ROUND_WAIT_MS;
+  // 模型名迟迟识别不出来通常是页面渲染慢或 DOM 结构临时变化，属于可恢复的偶发
+  // 状况，不是页面坏掉。这类超时直接跳过本轮开下一轮，而不是暂停整个抽卡。
+  // 但连续多轮都识别不出，说明大概率真的出问题了，此时才暂停以免空转烧额度。
+  const MODEL_TIMEOUT_MAX_SKIPS = 5;
 
   /* ---------------- 抽卡状态持久化（页面意外刷新后自动继续） ---------------- */
   // 只持久化「跨刷新仍然成立」的事实：运行状态、提示词、轮次、已识别模型名。
@@ -4612,7 +4616,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     const owner = {};
     let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始',dialogRetries:0}, prompt='', chars=[], typed='', due=0,
       deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false, dialogRetries=0,
-      resumeUntil=0;
+      resumeUntil=0, modelTimeoutSkips=0;
     function saveNow() {
       if (!persist || !storage) return;
       if (s.status === 'idle') { clearSaved(storage); return; }
@@ -4653,6 +4657,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
       const v=b.read(prompt);
       if(v.generating || v.draft || v.attachmentNames?.length || v.hasDialog || v.blocker || blocked()) throw Error('请先处理生成、草稿、附件或验证/限流提示');
       claim(owner); chars=Array.from(prompt); typed=''; gen=null; endedAt=null; expanded=false; dialogRetries=0;
+      modelTimeoutSkips=0;
       s={status:'running',phase:'prepare',round:0,model:'',message:'准备新对话；请勿同时运行桌面抽卡',dialogRetries:0};
       phase('prepare',800);report(s.message);return true;
     }
@@ -4688,6 +4693,23 @@ __mods["gacha-runner"] = { fn: function (exp) {
         throw err;
       }
     }
+    /**
+     * 本轮没能识别出模型名：跳过它，直接开下一轮。
+     * 只在连续失败达到上限时才暂停——任意一轮成功识别都会把计数归零。
+     */
+    function skipRoundOnModelTimeout(why) {
+      modelTimeoutSkips++;
+      if(modelTimeoutSkips>=MODEL_TIMEOUT_MAX_SKIPS) {
+        modelTimeoutSkips=0;
+        pause(why+'，且已连续 '+MODEL_TIMEOUT_MAX_SKIPS+' 轮未能识别模型名');
+        return;
+      }
+      // 与 answer 阶段结束后开下一轮走同一条路径，保证运行期量一致复位。
+      gen=null;baseGen=0;roundUrl=null;endedAt=null;expanded=false;
+      s.model='';
+      phase('prepare',800);
+      report(why+'，跳过本轮直接继续（第 '+modelTimeoutSkips+'/'+MODEL_TIMEOUT_MAX_SKIPS+' 次）');
+    }
     function tick() {
       if(s.status!=='running' || now()<due)return;
       due=now()+250; // Non-typing states need no high-frequency DOM polling.
@@ -4718,7 +4740,12 @@ __mods["gacha-runner"] = { fn: function (exp) {
         if(blocked() || v.blocker) {pause(v.blocker||'需要手动完成人机验证');return;}
         if(v.attachmentNames?.length) {pause('检测到附件，保留现场');return;}
         if(v.failed && s.phase==='answer') {pause('本轮生成失败');return;}
-        if(now()>deadline) {pause('等待页面、回答或模型名超时');return;}
+        if(now()>deadline) {
+          // answer 阶段的超时本质上就是「等不到模型名」，按可恢复处理；
+          // 其余阶段（输入、发送、开新会话）卡住通常是页面真出了问题，仍然暂停。
+          if(s.phase==='answer') {skipRoundOnModelTimeout('等待本轮模型名超时');return;}
+          pause('等待页面、回答或模型名超时');return;
+        }
         if(gen!==null && f.generation===gen && f.modelUrl===v.url && target(f.model)) {
           s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
           try { __req("notifier").playHitChime(); } catch {}
@@ -4834,6 +4861,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
             if(f.model && f.modelUrl===v.url){
               const firstSeen=!s.model;
               s.model=f.model;
+              modelTimeoutSkips=0;   // 识别成功，连续失败计数归零
               if(target(f.model)) {
                 s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
                 try { __req("notifier").playHitChime(); } catch {}
@@ -4846,7 +4874,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
                 endedAt=now();
                 report(secondary(s.model)?'回答完成（次要目标 '+s.model+'），等待 40 秒冷却':(s.model?'回答完成，未命中，准备下一轮':'回答完成，等待真实模型名'));
               }
-              if(now()-endedAt>120000 && !s.model){pause('未识别到本轮真实模型名');return;}
+              if(now()-endedAt>120000 && !s.model){skipRoundOnModelTimeout('未识别到本轮真实模型名');return;}
               if(s.model && now()-endedAt>=roundWait(s.model)){
                 phase('prepare',800);
                 report(secondary(s.model)?'次要目标 '+s.model+' 已等待 40 秒，准备下一轮':'未命中，准备下一轮');
@@ -4877,7 +4905,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     window.__AMP_PAGE_GACHA__?.dispose?.();
     const root=document.createElement('aside');root.id='amp-target-gacha';
     root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / GLM5.3 / gemini 不停止，等待40秒再继续。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
+    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / GLM5.3 / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
     const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
     const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},

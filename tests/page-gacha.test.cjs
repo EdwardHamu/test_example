@@ -53,8 +53,22 @@ test('webpage popup pauses after 5 failed waits of 5 seconds',()=>{
  assert.equal(e.runner.state().status,'paused');
  assert.match(e.runner.state().message,/未消失/);
 });
-test('unknown model never causes blind next-round retry; eventually pauses',()=>{
- const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();e.step(120001);assert.equal(e.runner.state().status,'paused');assert.equal(e.calls.length,1);
+test('unknown model skips the round and keeps running instead of pausing',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();e.step(120001);
+ // 旧行为是直接暂停；现在应保持运行并进入下一轮的 prepare 阶段。
+ assert.equal(e.runner.state().status,'running');
+ assert.equal(e.runner.state().phase,'prepare');
+ assert.match(e.runner.state().message,/跳过本轮/);
+});
+test('consecutive unknown-model timeouts eventually pause',()=>{
+ const e=setup();e.runner.start('你好');
+ // 连续 5 轮都识别不出模型名：前 4 轮继续，第 5 轮暂停，避免页面真坏掉时空转。
+ for(let i=0;i<5;i++){
+   e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();e.step(120001);
+   if(i<4){assert.equal(e.runner.state().status,'running');e.v.generating=false;e.v.responseComplete=false;e.v.conversation=false;}
+ }
+ assert.equal(e.runner.state().status,'paused');
+ assert.match(e.runner.state().message,/连续 5 轮/);
 });
 test('old session model names and response body keywords cannot match',()=>{
  const e=setup();e.runner.start('你好');e.until('answer');e.facts.model='astra-old';e.facts.modelUrl='https://arena.ai/agent/old';e.v.response='fable';e.step(500);assert.equal(e.runner.state().status,'running');assert.equal(e.runner.state().model,'');
