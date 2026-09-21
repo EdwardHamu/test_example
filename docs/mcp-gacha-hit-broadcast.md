@@ -1,5 +1,9 @@
 # 抽卡命中首要目标时广播外部通知
 
+> 2026-09-21 更新：`/notify` 在浏览器内会被 CORS 预检拦截，端点已切换为 `/koa/notify2`
+> （`text/plain` + `mode: 'no-cors'`）。原因、新契约与代价见 `docs/mcp-gacha-notify-cors.md`。
+> 下文的接口契约与测试描述为接入当时的状态。
+
 ## 背景
 
 网页内抽卡命中首要目标（`astra` / `fable`）时，原本只有两种提示：面板文字更新和

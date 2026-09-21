@@ -4145,18 +4145,28 @@ __mods["notifier"] = { fn: function (exp) {
   exp.flashTitle = flashTitle;
   exp.isDomGenerating = isDomGenerating;
 
-  /* ---------------- 外部通知广播（meamoe.top/koa/notify） ---------------- */
-  // 抽卡命中首要目标时把消息广播到自建 Koa 服务，由它经 Socket.IO 推给所有在线
+  /* ---------------- 外部通知广播（meamoe.top/koa/notify2） ---------------- */
+  // 抽卡命中首要目标时把消息广播到自建服务，由它经 Socket.IO 推给所有在线
   // 客户端（手机/其他电脑），这样人不在这台机器前也能第一时间知道。
   // 接口契约见 lexue_rs 仓库 docs/notification-broadcast-api.md：
-  //   POST /notify，无需鉴权，请求体是任意合法 JSON，原样作为事件数据广播。
-  const BROADCAST_URL = 'https://meamoe.top/koa/notify';
+  //   POST /notify2（别名 /notification2），无需鉴权，请求体是任意合法 JSON，
+  //   原样作为事件数据广播；专为浏览器直连设计，接受 text/plain 请求体。
+  //
+  // 为什么是 /notify2 + text/plain + no-cors（详见 docs/mcp-gacha-notify-cors.md）：
+  //   页面在 arena.ai，通知服务在 meamoe.top，属于跨域请求。旧的 /notify 只收
+  //   application/json，浏览器会先发 CORS 预检，而服务端预检响应的 allow-origin
+  //   写死为自己的域名，请求在浏览器端就被拦下。text/plain 属于「简单请求」，
+  //   不触发预检；mode: 'no-cors' 让浏览器不再校验响应的 CORS 头。代价是响应
+  //   变成 opaque（status 0 / ok false），页面端分不清 2xx 与 4xx/5xx，只能感知
+  //   网络级失败（断网、DNS、超时）。
+  const BROADCAST_URL = 'https://meamoe.top/koa/notify2';
   const BROADCAST_TIMEOUT_MS = 8000;
 
   /**
    * 向外部服务广播一条通知。
    * 纯附加功能：任何失败（网络不通、服务没起、超时）都只 warn，绝不抛出，
    * 以免影响抽卡主流程或掩盖「已命中」这个更重要的事实。
+   * 返回 true 表示请求已发出且未在网络层失败；no-cors 下拿不到服务端状态码。
    */
   async function broadcast(payload) {
     if (typeof fetch !== 'function') return false;
@@ -4166,15 +4176,23 @@ __mods["notifier"] = { fn: function (exp) {
       if (ctrl) timer = setTimeout(() => { try { ctrl.abort(); } catch {} }, BROADCAST_TIMEOUT_MS);
       const res = await fetch(BROADCAST_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // text/plain 在 CORS 安全列表内，浏览器不发预检；/notify2 会按 JSON 解析请求体。
+        // 不要再加任何自定义头，否则又会触发预检。
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(payload),
         signal: ctrl ? ctrl.signal : undefined,
         // 通知服务与页面不同源，且接口无需鉴权，不要带上 arena.ai 的 Cookie。
         credentials: 'omit',
-        mode: 'cors',
+        // 不校验响应的 CORS 头；响应为 opaque，见上方说明。
+        mode: 'no-cors',
         cache: 'no-store',
+        // 命中后页面可能随即刷新/跳转，keepalive 让请求在页面卸载后也能发完。
+        keepalive: true,
       });
-      if (!res.ok) { console.warn('[amp] broadcast HTTP', res.status); return false; }
+      // opaque 响应读不到状态码：fetch 正常 settle 即视为已送达。
+      // 非 opaque 响应（同源、测试桩）仍按状态码判断。
+      if (res && res.type === 'opaque') return true;
+      if (!res || !res.ok) { console.warn('[amp] broadcast HTTP', res ? res.status : 'no response'); return false; }
       return true;
     } catch (err) {
       console.warn('[amp] broadcast failed:', err && err.message ? err.message : err);
@@ -4200,8 +4218,32 @@ __mods["notifier"] = { fn: function (exp) {
       ...extra,
     });
   }
+
+  /**
+   * 抽卡意外停止时广播。reason 为机器可读枚举（drift / captcha / timeout / error …），
+   * detail 为给人看的说明，round 为停止时的轮次。
+   * 手动停止、达到设定轮数、命中目标属于正常收尾，不走这里。
+   */
+  function broadcastStop(reason, detail, round, extra = {}) {
+    const code = typeof reason === 'string' && reason ? reason : 'unknown';
+    const text = typeof detail === 'string' && detail ? detail : '';
+    return broadcast({
+      title: 'Arena 抽卡意外停止',
+      content: '抽卡已停止：' + (text || code) + (Number.isFinite(round) ? ('（第 ' + round + ' 轮）') : ''),
+      level: 'warning',
+      source: 'arena-model-probe',
+      event: 'gacha-stopped',
+      reason: code,
+      detail: text,
+      round: Number.isFinite(round) ? round : null,
+      url: typeof location !== 'undefined' ? location.href : '',
+      at: new Date().toISOString(),
+      ...extra,
+    });
+  }
   exp.broadcast = broadcast;
   exp.broadcastHit = broadcastHit;
+  exp.broadcastStop = broadcastStop;
 } };
 __mods["captcha-alert"] = { fn: function (exp) {
   // Inspect only visible UI, never conversation text or cross-origin frame contents.
@@ -4631,6 +4673,23 @@ __mods["gacha-runner"] = { fn: function (exp) {
   // 但连续多轮都识别不出，说明大概率真的出问题了，此时才暂停以免空转烧额度。
   const MODEL_TIMEOUT_MAX_SKIPS = 5;
 
+  /* ---------------- 意外停止原因分类（供外部通知接收端过滤） ---------------- */
+  // pause() 的文案是给人看的；这里映射成粗粒度、机器可读的枚举，detail 仍原样携带文案。
+  // drifted 为真表示本轮生成是被「模型不一致自动停止」点停的，此时生成失败归因为 drift。
+  function classifyPause(message, drifted = false) {
+    const m = String(message || '');
+    if (/人机验证|验证码|captcha/i.test(m)) return 'captcha';
+    if (/限流|429/.test(m)) return 'rate-limit';
+    if (/登录/.test(m)) return 'auth';
+    if (/条款/.test(m)) return 'blocked';
+    if (/弹窗|dialog/i.test(m)) return 'dialog';
+    if (/精力值|pulse/i.test(m)) return 'pulse';
+    if (/生成失败/.test(m)) return drifted ? 'drift' : 'generation-failed';
+    if (/超时|未能识别模型名/.test(m)) return 'timeout';
+    if (/切换|跳转|改变|其他会话|草稿|附件|未覆盖/.test(m)) return 'page-changed';
+    return 'error';
+  }
+
   /* ---------------- 抽卡状态持久化（页面意外刷新后自动继续） ---------------- */
   // 只持久化「跨刷新仍然成立」的事实：运行状态、提示词、轮次、已识别模型名。
   // 不持久化 gen / baseGen / deadline 等运行期量：它们绑定 BUS.generation 与
@@ -4681,7 +4740,29 @@ __mods["gacha-runner"] = { fn: function (exp) {
       writeSaved(storage, {v:1, status:s.status, phase:s.phase, prompt, round:s.round, model:s.model, savedAt:clock()});
     }
     function report(message) { s.message=message; s.dialogRetries=dialogRetries; saveNow(); onChange({...s}); }
-    function pause(message) { s.status='paused'; s.dialogRetries=dialogRetries; report(message+'；已暂停，请处理后重新开始。'); }
+    /**
+     * 意外停止的唯一出口：验证码/限流、弹窗、超时、页面被改、生成失败、未捕获异常等全部经此暂停。
+     * 手动 stop() 与命中 matched 不走这里。只在 running → paused 的那一次广播外部通知，
+     * 所以每次运行最多一条，不需要额外的去重锁。
+     */
+    function pause(message) {
+      const wasRunning = s.status === 'running';
+      s.status='paused'; s.dialogRetries=dialogRetries;
+      report(message+'；已暂停，请处理后重新开始。');
+      if (wasRunning) { try { notifyStop(message); } catch { /* 通知失败不能影响暂停本身 */ } }
+    }
+    function notifyStop(message) {
+      const n = __req("notifier");
+      if (!n || typeof n.broadcastStop !== 'function') return;
+      let drifted = false;
+      try {
+        const d = typeof n.lastModelDrift === 'function' ? n.lastModelDrift() : null;
+        drifted = !!(d && d.stopped && gen !== null && d.generation === gen);
+      } catch { /* noop */ }
+      const extra = { phase: s.phase };
+      if (s.model) extra.model = s.model;
+      n.broadcastStop(classifyPause(message, drifted), message, s.round, extra);
+    }
     function phase(name,delay=0,timeout=30000) { s.phase=name; due=now()+delay; deadline=now()+timeout; }
     function stop() { s.status='stopped'; dialogRetries=0; s.dialogRetries=0; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
     /**
@@ -4995,6 +5076,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     window.__AMP_PAGE_GACHA__=api;return api;
   }
   exp.target=target;exp.secondary=secondary;exp.roundWait=roundWait;exp.create=create;exp.mount=mount;
+  exp.classifyPause=classifyPause;
   exp.GACHA_STATE_KEY=GACHA_STATE_KEY;exp.RESUME_TTL_MS=RESUME_TTL_MS;
   exp.readSaved=readSaved;exp.clearSaved=clearSaved;exp.resumable=resumable;
 } };
