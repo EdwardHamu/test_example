@@ -4144,6 +4144,64 @@ __mods["notifier"] = { fn: function (exp) {
   exp.playFallbackChime = playCompletionChime; // Preserve the legacy export name.
   exp.flashTitle = flashTitle;
   exp.isDomGenerating = isDomGenerating;
+
+  /* ---------------- 外部通知广播（meamoe.top/koa/notify） ---------------- */
+  // 抽卡命中首要目标时把消息广播到自建 Koa 服务，由它经 Socket.IO 推给所有在线
+  // 客户端（手机/其他电脑），这样人不在这台机器前也能第一时间知道。
+  // 接口契约见 lexue_rs 仓库 docs/notification-broadcast-api.md：
+  //   POST /notify，无需鉴权，请求体是任意合法 JSON，原样作为事件数据广播。
+  const BROADCAST_URL = 'https://meamoe.top/koa/notify';
+  const BROADCAST_TIMEOUT_MS = 8000;
+
+  /**
+   * 向外部服务广播一条通知。
+   * 纯附加功能：任何失败（网络不通、服务没起、超时）都只 warn，绝不抛出，
+   * 以免影响抽卡主流程或掩盖「已命中」这个更重要的事实。
+   */
+  async function broadcast(payload) {
+    if (typeof fetch !== 'function') return false;
+    let timer = null;
+    try {
+      const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      if (ctrl) timer = setTimeout(() => { try { ctrl.abort(); } catch {} }, BROADCAST_TIMEOUT_MS);
+      const res = await fetch(BROADCAST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: ctrl ? ctrl.signal : undefined,
+        // 通知服务与页面不同源，且接口无需鉴权，不要带上 arena.ai 的 Cookie。
+        credentials: 'omit',
+        mode: 'cors',
+        cache: 'no-store',
+      });
+      if (!res.ok) { console.warn('[amp] broadcast HTTP', res.status); return false; }
+      return true;
+    } catch (err) {
+      console.warn('[amp] broadcast failed:', err && err.message ? err.message : err);
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** 命中首要目标时广播。model 为命中的模型名，round 为当前轮次。 */
+  function broadcastHit(model, round, extra = {}) {
+    const name = typeof model === 'string' && model ? model : '未知模型';
+    return broadcast({
+      title: 'Arena 抽卡命中',
+      content: '命中首要目标 ' + name + (Number.isFinite(round) ? ('（第 ' + round + ' 轮）') : ''),
+      level: 'success',
+      source: 'arena-model-probe',
+      event: 'gacha-hit',
+      model: name,
+      round: Number.isFinite(round) ? round : null,
+      url: typeof location !== 'undefined' ? location.href : '',
+      at: new Date().toISOString(),
+      ...extra,
+    });
+  }
+  exp.broadcast = broadcast;
+  exp.broadcastHit = broadcastHit;
 } };
 __mods["captcha-alert"] = { fn: function (exp) {
   // Inspect only visible UI, never conversation text or cross-origin frame contents.
@@ -4749,6 +4807,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
         if(gen!==null && f.generation===gen && f.modelUrl===v.url && target(f.model)) {
           s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
           try { __req("notifier").playHitChime(); } catch {}
+          try { __req("notifier").broadcastHit(f.model, s.round); } catch {}
           return;
         }
         if(s.phase==='prepare' && gen!==null && v.url!==roundUrl){pause('准备下一轮时页面被切换');return;}
@@ -4765,6 +4824,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
                 s.model=f.model;
                 if(target(f.model)){s.status='matched';report('恢复后命中 '+f.model+'，已停止开新会话；保留当前回答。');
                   try { __req("notifier").playHitChime(); } catch {}
+                  try { __req("notifier").broadcastHit(f.model, s.round, { resumed: true }); } catch {}
                   return;}
               }
               report('页面已刷新，等待上一轮回答结束');
@@ -4775,6 +4835,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
               s.model=f.model;
               if(target(f.model)){s.status='matched';report('恢复后命中 '+f.model+'，已停止开新会话；保留当前回答。');
                 try { __req("notifier").playHitChime(); } catch {}
+                try { __req("notifier").broadcastHit(f.model, s.round, { resumed: true }); } catch {}
                 return;}
             }
             if(!s.model && v.conversation && now()<resumeUntil){
@@ -4865,6 +4926,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
               if(target(f.model)) {
                 s.model=f.model;s.status='matched';report('命中 '+f.model+'，已停止开新会话；保留当前回答。');
                 try { __req("notifier").playHitChime(); } catch {}
+                try { __req("notifier").broadcastHit(f.model, s.round); } catch {}
                 return;
               }
               if(firstSeen && secondary(f.model)) report('次要目标 '+f.model+'，本轮结束后等待 40 秒再继续');
