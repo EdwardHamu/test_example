@@ -3246,6 +3246,7 @@ class HUD {
           <button data-act="test-notify" title="发送一条测试系统通知">测试通知</button>
           <button data-act="toggle-esc" style="${extras.autoEscEnabled ? 'border-color:#238636;color:#7ee787' : ''}">Esc: ${extras.autoEscEnabled ? '开启' : '关闭'}</button>
           <button data-act="test-esc" title="模拟触发一次 Esc 键">测试 Esc</button>
+          <button data-act="toggle-drift" style="${extras.driftStopEnabled ? 'border-color:#238636;color:#7ee787' : ''}" title="模型名与上一轮不一致时自动点击停止">模型变更停止: ${extras.driftStopEnabled ? '开启' : '关闭'}</button>
         </div>
         <div class="log">${this.logs.join('')}</div>
       </div>`;
@@ -3530,6 +3531,183 @@ __mods["notifier"] = { fn: function (exp) {
       }
     } catch { /* noop */ }
     return autoEscEnabled;
+  }
+
+  /* ---------------- 模型名漂移自动停止（Model Drift Auto-Stop） ---------------- */
+  // 背景：runmodel 模块的 reset() 会在每个 turn-start 清空 STATE.modelHistory，
+  // 因此「上一轮模型名」无法从 runState() 读取，必须在本模块内独立保存基准。
+  // 该基准只在内存中跨轮保留，刷新页面即自然重置，不写 localStorage。
+  const DRIFT_STORAGE_KEY = 'amp_model_drift_stop_enabled';
+  let driftStopEnabled = true;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const savedDrift = localStorage.getItem(DRIFT_STORAGE_KEY);
+      if (savedDrift !== null) driftStopEnabled = savedDrift === 'true';
+    }
+  } catch { /* noop */ }
+
+  // 上一轮（跨 turn 保留）的真实模型名基准，以及已处置过的 generation，避免重复点击。
+  let previousModelName = null;
+  let driftHandledGeneration = -1;
+  let lastDriftEvent = null;
+
+  function isModelDriftStopEnabled() { return driftStopEnabled; }
+  function setModelDriftStopEnabled(val) {
+    driftStopEnabled = !!val;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(DRIFT_STORAGE_KEY, String(driftStopEnabled));
+      }
+    } catch { /* noop */ }
+    return driftStopEnabled;
+  }
+
+  function modelBaseline() { return previousModelName; }
+  function lastModelDrift() { return lastDriftEvent; }
+  function resetModelBaseline(name = null) {
+    previousModelName = typeof name === 'string' && name.trim() ? name.trim() : null;
+    driftHandledGeneration = -1;
+    lastDriftEvent = null;
+    return previousModelName;
+  }
+
+  // 归一化：忽略大小写、两端空白与 -vertex 路由后缀，避免同一模型被误判为漂移。
+  function normalizeModelName(name) {
+    if (typeof name !== 'string') return '';
+    return name.trim().replace(/-vertex$/i, '').toLowerCase();
+  }
+
+  // 定位「发送 / 停止」同一位置的那个按钮。生成中该按钮呈现为 Stop generating，
+  // 因此只在按钮确实处于停止态时才点击，绝不会误点成发送。
+  function findStopButton() {
+    if (typeof document === 'undefined') return null;
+    try {
+      const visible = el => {
+        if (!el) return false;
+        try {
+          if (typeof el.getClientRects === 'function' && el.getClientRects().length === 0) return false;
+          if (typeof getComputedStyle === 'function' && getComputedStyle(el).visibility === 'hidden') return false;
+        } catch { /* noop */ }
+        return true;
+      };
+      const label = el => ((el.getAttribute && el.getAttribute('aria-label')) || el.textContent || '').trim().replace(/\s+/g, ' ');
+      const mains = (typeof document.querySelectorAll === 'function' ? [...document.querySelectorAll('main')] : []).filter(visible);
+      const root = mains[0] || document.body || document;
+      if (!root || typeof root.querySelectorAll !== 'function') return null;
+      const btns = [...root.querySelectorAll('button,[role="button"]')].filter(visible);
+      return btns.find(b => {
+        // 会话记录区里的按钮不是发送/停止控件，必须排除。
+        if (b.closest && b.closest('[role="log"]')) return false;
+        if (b.disabled) return false;
+        const l = label(b);
+        const aria = (b.getAttribute && b.getAttribute('aria-label')) || '';
+        return /^(?:stop generating|stop|停止生成|停止)$/i.test(l) || /stop generating/i.test(aria);
+      }) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 只做一次原生点击；不改地址栏、不提交表单、不触发任何导航。
+  function clickStopButton() {
+    const btn = findStopButton();
+    if (!btn) return false;
+    try {
+      btn.click();
+      return true;
+    } catch (err) {
+      console.warn('[amp] 点击停止按钮失败:', err);
+      return false;
+    }
+  }
+
+  async function playDriftChime() {
+    // 复用既有的命中提示音；失败时退回完成提示音，两者都不涉及页面导航。
+    try {
+      await playHitChime();
+    } catch {
+      try { await playCompletionChime(); } catch { /* noop */ }
+    }
+  }
+
+  function notifyDrift(current, previous, stopped) {
+    const title = stopped ? 'Arena 模型探针 · 模型不一致已停止' : 'Arena 模型探针 · 模型不一致';
+    const body = `上一轮：${previous || '未知'}\n本轮：${current || '未知'}` +
+      (stopped ? '\n已自动点击停止按钮。' : '\n未找到停止按钮，可能已生成结束。');
+    flashTitle('模型不一致');
+    playDriftChime();
+    if (typeof Notification === 'undefined') return false;
+    const doNotify = () => {
+      try {
+        const n = new Notification(title, {
+          body,
+          icon: NOTIFY_ICON,
+          tag: 'amp-model-drift',
+          renotify: true,
+          silent: true,
+        });
+        n.onclick = function () {
+          try { if (typeof window !== 'undefined') window.focus(); } catch { /* noop */ }
+          try { this.close(); } catch { /* noop */ }
+        };
+        return true;
+      } catch (err) {
+        console.warn('[amp] 模型不一致通知弹出失败:', err);
+        return false;
+      }
+    };
+    if (Notification.permission === 'granted') return doNotify();
+    if (Notification.permission === 'default') {
+      requestPermission().then(perm => { if (perm === 'granted') doNotify(); }).catch(() => {});
+    }
+    return false;
+  }
+
+  /**
+   * 比对本轮真实模型名与上一轮基准；不一致时立刻点击停止按钮。
+   * 返回 null 表示未构成漂移（首轮、同名、功能关闭或本代已处置过）。
+   */
+  function checkModelDrift(currentName, meta = {}) {
+    const current = typeof currentName === 'string' ? currentName.trim() : '';
+    if (!current) return null;
+
+    const generation = typeof meta.generation === 'number' ? meta.generation : BUS.generation;
+    const previous = previousModelName;
+
+    // 首轮没有基准可比，只记录，不做任何动作。
+    if (!previous) {
+      previousModelName = current;
+      return null;
+    }
+
+    if (normalizeModelName(previous) === normalizeModelName(current)) {
+      previousModelName = current;
+      return null;
+    }
+
+    // 同一 generation 内只处置一次，避免 recompute 多次触发重复点击。
+    if (driftHandledGeneration === generation) {
+      previousModelName = current;
+      return null;
+    }
+    driftHandledGeneration = generation;
+
+    const event = { previous, current, generation, at: Date.now(), stopped: false, enabled: driftStopEnabled };
+    // 基准立即前移到本轮，下一轮以本轮为准继续比对。
+    previousModelName = current;
+
+    if (!driftStopEnabled) {
+      lastDriftEvent = event;
+      return event;
+    }
+
+    event.stopped = clickStopButton();
+    lastDriftEvent = event;
+    try { notifyDrift(current, previous, event.stopped); } catch { /* noop */ }
+    try {
+      BUS.emit({ kind: 'model-drift-stop', data: { ...event } });
+    } catch { /* noop */ }
+    return event;
   }
 
   function triggerEscapeKey() {
@@ -3947,6 +4125,15 @@ __mods["notifier"] = { fn: function (exp) {
   exp.isAutoEscEnabled = isAutoEscEnabled;
   exp.setAutoEscEnabled = setAutoEscEnabled;
   exp.triggerEscapeKey = triggerEscapeKey;
+  exp.isModelDriftStopEnabled = isModelDriftStopEnabled;
+  exp.setModelDriftStopEnabled = setModelDriftStopEnabled;
+  exp.checkModelDrift = checkModelDrift;
+  exp.modelBaseline = modelBaseline;
+  exp.resetModelBaseline = resetModelBaseline;
+  exp.lastModelDrift = lastModelDrift;
+  exp.normalizeModelName = normalizeModelName;
+  exp.findStopButton = findStopButton;
+  exp.clickStopButton = clickStopButton;
   exp.requestPermission = requestPermission;
   exp.notify = notify;
   exp.testNotification = testNotification;
@@ -4381,15 +4568,80 @@ __mods["gacha-runner"] = { fn: function (exp) {
   const secondary = name => typeof name === 'string' && !target(name) && /sol|opus|glm[\s._-]*5[\s._-]*3|gemini/i.test(name);
   const ROUND_WAIT_MS = 0, SECONDARY_WAIT_MS = 40000;
   const roundWait = name => secondary(name) ? SECONDARY_WAIT_MS : ROUND_WAIT_MS;
+
+  /* ---------------- 抽卡状态持久化（页面意外刷新后自动继续） ---------------- */
+  // 只持久化「跨刷新仍然成立」的事实：运行状态、提示词、轮次、已识别模型名。
+  // 不持久化 gen / baseGen / deadline 等运行期量：它们绑定 BUS.generation 与
+  // performance.now()，刷新后必然失效，原样恢复会造成误判或重复发送。
+  const GACHA_STATE_KEY = 'amp_page_gacha_session';
+  const RESUME_TTL_MS = 30 * 60 * 1000;   // 超过 30 分钟的残留状态不再自动恢复
+  const RESUME_GRACE_MS = 45000;          // 刷新后最多等 45 秒确认上一轮模型名
+  function defaultStorage() {
+    try { if (typeof localStorage !== 'undefined') return localStorage; } catch { /* noop */ }
+    return null;
+  }
+  function readSaved(storage = defaultStorage()) {
+    try {
+      if (!storage) return null;
+      const raw = storage.getItem(GACHA_STATE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || data.v !== 1 || typeof data.prompt !== 'string') return null;
+      return data;
+    } catch { return null; }
+  }
+  function writeSaved(storage, data) {
+    try { if (storage) storage.setItem(GACHA_STATE_KEY, JSON.stringify(data)); } catch { /* noop */ }
+  }
+  function clearSaved(storage = defaultStorage()) {
+    try { if (storage) storage.removeItem(GACHA_STATE_KEY); } catch { /* noop */ }
+  }
+  // 只有「运行中」且未过期的快照才自动继续；paused / matched / stopped 一律不自动重启。
+  function resumable(data, clock = () => Date.now(), ttl = RESUME_TTL_MS) {
+    if (!data || data.v !== 1) return false;
+    if (data.status !== 'running') return false;
+    if (typeof data.prompt !== 'string' || !data.prompt) return false;
+    if (Array.from(data.prompt).length > 1000) return false;
+    const age = clock() - (Number(data.savedAt) || 0);
+    return age >= 0 && age <= ttl;
+  }
+
   function create({bridge, info, blocked = () => false, now = () => performance.now(), random = Math.random,
-    claim = () => {}, release = () => {}, onChange = () => {}}) {
+    claim = () => {}, release = () => {}, onChange = () => {},
+    storage = defaultStorage(), clock = () => Date.now(), persist = true}) {
     const owner = {};
     let s = {status:'idle',phase:'idle',round:0,model:'',message:'等待开始',dialogRetries:0}, prompt='', chars=[], typed='', due=0,
-      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false, dialogRetries=0;
-    function report(message) { s.message=message; s.dialogRetries=dialogRetries; onChange({...s}); }
+      deadline=0, baseGen=0, gen=null, roundUrl=null, editUrl=null, endedAt=null, expanded=false, dialogRetries=0,
+      resumeUntil=0;
+    function saveNow() {
+      if (!persist || !storage) return;
+      if (s.status === 'idle') { clearSaved(storage); return; }
+      writeSaved(storage, {v:1, status:s.status, phase:s.phase, prompt, round:s.round, model:s.model, savedAt:clock()});
+    }
+    function report(message) { s.message=message; s.dialogRetries=dialogRetries; saveNow(); onChange({...s}); }
     function pause(message) { s.status='paused'; s.dialogRetries=dialogRetries; report(message+'；已暂停，请处理后重新开始。'); }
     function phase(name,delay=0,timeout=30000) { s.phase=name; due=now()+delay; deadline=now()+timeout; }
     function stop() { s.status='stopped'; dialogRetries=0; s.dialogRetries=0; release(owner); report('已停止自动操作；保留当前草稿和正在生成的回答。'); }
+    /**
+     * 页面意外刷新后按快照恢复。
+     * 不直接回到刷新前的 phase：typing/send 的草稿已随刷新丢失，answer 的
+     * generation 基准已失效。统一进入 resume 阶段重新对齐页面真实状态。
+     */
+    function restore(saved) {
+      if (!resumable(saved, clock)) return false;
+      prompt = String(saved.prompt || '').trim();
+      if (!prompt) return false;
+      chars = Array.from(prompt); typed = '';
+      gen = null; baseGen = 0; roundUrl = null; editUrl = null; endedAt = null;
+      expanded = false; dialogRetries = 0;
+      claim(owner);
+      s = {status:'running', phase:'resume', round:Number(saved.round) || 0,
+        model:typeof saved.model === 'string' ? saved.model : '', message:'页面已刷新，正在恢复抽卡', dialogRetries:0};
+      resumeUntil = now() + RESUME_GRACE_MS;
+      phase('resume', 1200, 600000);
+      report(s.message);
+      return true;
+    }
     function start(value) {
       if(s.status==='running') return false;
       if (BUS?.pulseInfo && typeof BUS.pulseInfo.pulse === 'number' && BUS.pulseInfo.pulse <= 0) {
@@ -4475,6 +4727,40 @@ __mods["gacha-runner"] = { fn: function (exp) {
         if(s.phase==='prepare' && gen!==null && v.url!==roundUrl){pause('准备下一轮时页面被切换');return;}
         if(['typing','send'].includes(s.phase) && v.url!==editUrl) {pause('输入期间页面发生跳转');return;}
         switch(s.phase) {
+          case 'resume': {
+            // 刷新后重新对齐：先等页面骨架就绪，再决定接着上一轮还是直接开新一轮。
+            if(!v.main)return;
+            if(v.attachmentNames?.length){pause('恢复时检测到附件，保留现场');return;}
+            // 刷新瞬间可能仍有上一轮回答在生成：等它结束并尽量补记模型名。
+            if(v.generating){
+              resumeUntil=Math.max(resumeUntil,now()+RESUME_GRACE_MS);
+              if(f.model && f.modelUrl===v.url){
+                s.model=f.model;
+                if(target(f.model)){s.status='matched';report('恢复后命中 '+f.model+'，已停止开新会话；保留当前回答。');
+                  try { __req("notifier").playHitChime(); } catch {}
+                  return;}
+              }
+              report('页面已刷新，等待上一轮回答结束');
+              return;
+            }
+            // 回答已结束：给一小段宽限期等待真实模型名回填，命中则直接停。
+            if(f.model && f.modelUrl===v.url){
+              s.model=f.model;
+              if(target(f.model)){s.status='matched';report('恢复后命中 '+f.model+'，已停止开新会话；保留当前回答。');
+                try { __req("notifier").playHitChime(); } catch {}
+                return;}
+            }
+            if(!s.model && v.conversation && now()<resumeUntil){
+              report('页面已刷新，正在确认上一轮模型名');
+              return;
+            }
+            if(v.draft){pause('恢复时发现草稿，已保留，请自行处理');return;}
+            // 对齐完成，回到常规流程开新一轮。
+            gen=null;baseGen=0;roundUrl=null;endedAt=null;expanded=false;
+            phase('prepare',800);
+            report(s.model?('已恢复（上一轮 '+s.model+'），准备下一轮'):'已恢复，准备下一轮');
+            break;
+          }
           case 'prepare':
             if(v.generating || v.draft) {pause('当前有生成或草稿，未覆盖');return;}
             if(!v.main)return;
@@ -4584,7 +4870,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
         pause(e?.message||String(e));
       }
     }
-    return {start,stop,tick,state:()=>({...s}),dispose:()=>{stop();}};
+    return {start,stop,tick,restore,state:()=>({...s}),dispose:()=>{stop();}};
   }
   function mount({info, blocked}) {
     if(typeof document==='undefined' || !document.body)return null;
@@ -4597,13 +4883,30 @@ __mods["gacha-runner"] = { fn: function (exp) {
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
       onChange:s=>{status.textContent=`第 ${s.round} 轮 · ${s.message}`;startButton.disabled=s.status==='running';input.disabled=s.status==='running';}});
     startButton.onclick=()=>{try{runner.start(input.value);}catch(e){status.textContent=e.message;}};
-    root.querySelector('[data-stop]').onclick=()=>runner.stop();
+    // 手动停止视为明确意图：清除存档，刷新后不再自动继续。
+    root.querySelector('[data-stop]').onclick=()=>{runner.stop();clearSaved();};
     document.body.appendChild(root);
+    // 页面意外刷新后自动继续：仅当存档处于 running 且未过期。
+    let resumed=false;
+    try {
+      const saved=readSaved();
+      if(resumable(saved)) {
+        input.value=saved.prompt;
+        resumed=runner.restore(saved);
+      } else if(saved) {
+        // paused / matched / stopped 或已过期：保留提示词方便手动重开，但不自动启动。
+        if(typeof saved.prompt==='string' && saved.prompt) input.value=saved.prompt;
+        clearSaved();
+      }
+    } catch { /* 存档损坏不应阻塞面板挂载 */ }
     const timer=setInterval(runner.tick,25);
-    const api={start:runner.start,stop:runner.stop,state:runner.state,dispose(){clearInterval(timer);runner.dispose();root.remove();}};
+    const api={start:runner.start,stop:runner.stop,state:runner.state,resumed:()=>resumed,
+      dispose(){clearInterval(timer);runner.dispose();root.remove();}};
     window.__AMP_PAGE_GACHA__=api;return api;
   }
   exp.target=target;exp.secondary=secondary;exp.roundWait=roundWait;exp.create=create;exp.mount=mount;
+  exp.GACHA_STATE_KEY=GACHA_STATE_KEY;exp.RESUME_TTL_MS=RESUME_TTL_MS;
+  exp.readSaved=readSaved;exp.clearSaved=clearSaved;exp.resumable=resumable;
 } };
 __mods["gacha-cooldown"] = { fn: function (exp) {
   const WAIT_MS = 10000;
@@ -4802,6 +5105,12 @@ function boot(opts = {}) {
         const ok = notifier.triggerEscapeKey();
         state.hud?.log(ok ? 'Esc 键触发成功' : 'Esc 键触发失败');
       }
+      if (act === 'toggle-drift') {
+        const next = !notifier.isModelDriftStopEnabled();
+        notifier.setModelDriftStopEnabled(next);
+        state.hud?.log(`模型变更自动停止已${next ? '开启' : '关闭'}`);
+        recompute('drift-toggle');
+      }
     };
     state.hud?.log(`探针 v${VERSION} 已挂载，指纹库 ${REGISTRY_VERSION}`);
     state.hud?.log('等待页面发起对话请求…');
@@ -4856,6 +5165,18 @@ function boot(opts = {}) {
     if (evt.kind === 'run-model') {
       const name = evt.data && evt.data.name;
       state.hud?.log(`★ 真实模型名: ${name}`);
+      // 模型名与上一轮不一致时立刻停止本轮生成（停止/发送为同一按钮，
+      // 只在按钮处于「Stop generating」状态时点击，不会误触发送）。
+      try {
+        const drift = notifier.checkModelDrift(name, { generation: BUS.generation });
+        if (drift) {
+          state.hud?.log(drift.stopped
+            ? `⛔ 模型名变更：${drift.previous} → ${drift.current}，已自动点击停止`
+            : `⚠ 模型名变更：${drift.previous} → ${drift.current}${drift.enabled ? '（未找到停止按钮，可能已生成完毕）' : '（自动停止已关闭）'}`);
+        }
+      } catch (e) {
+        state.hud?.log(`模型变更检测失败: ${e && e.message}`);
+      }
       // 把已验证的真名单独存档：这类名字（如 qwen-latest-series-invite-202608-m4）
       // 常不在公开目录里，指纹无法归类，但真名是确定的，必须原样记住。
       try {
@@ -4978,6 +5299,7 @@ function boot(opts = {}) {
       state.hud.render(verdict, {
         notifyEnabled: notifier.isEnabled(),
         autoEscEnabled: notifier.isAutoEscEnabled(),
+        driftStopEnabled: notifier.isModelDriftStopEnabled(),
         reasoning: currentFacts().effort,
         reasoningFacts: currentFacts(),
         diagnostics: BUS.diagnostics,
@@ -5116,6 +5438,22 @@ function boot(opts = {}) {
     setAutoEscEnabled: (val) => { const r = notifier.setAutoEscEnabled(val); if (state.hud) recompute('esc-toggle'); return r; },
     /** 查询会话结束自动触发 Esc 键当前是否开启 */
     isAutoEscEnabled: () => notifier.isAutoEscEnabled(),
+
+    // ---- 模型名变更自动停止 ----
+    /** 开启或关闭「模型名与上一轮不一致时自动点击停止」 */
+    setModelDriftStopEnabled: (val) => { const r = notifier.setModelDriftStopEnabled(val); if (state.hud) recompute('drift-toggle'); return r; },
+    /** 查询模型名变更自动停止当前是否开启 */
+    isModelDriftStopEnabled: () => notifier.isModelDriftStopEnabled(),
+    /** 当前用于比对的上一轮模型名基准 */
+    modelBaseline: () => notifier.modelBaseline(),
+    /** 重设基准（传入名字则以该名字为准，留空则清空，下一轮重新锚定） */
+    resetModelBaseline: (name) => notifier.resetModelBaseline(name),
+    /** 最近一次检测到的模型名变更事件 */
+    lastModelDrift: () => notifier.lastModelDrift(),
+    /** 手动执行一次模型名比对（调试用） */
+    checkModelDrift: (name) => notifier.checkModelDrift(name, { generation: BUS.generation }),
+    /** 手动点击一次停止按钮（调试用） */
+    clickStop: () => notifier.clickStopButton(),
 
     // ---- 用户精力值 (Pulse) 与额度接口 ----
     /** 获取当前用户精力值状态对象 { pulse: number, refreshedAt: string } */
