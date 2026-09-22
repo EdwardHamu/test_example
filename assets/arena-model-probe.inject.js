@@ -3037,6 +3037,8 @@ __mods["ui"] = { fn: function (exp) {
 
 const CSS = `
 :host { all: initial; }
+/* Static probe UI only; do not change animations on the underlying page. */
+:host, *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 .wrap {
   position: fixed; right: 16px; top: 16px; z-index: 2147483647;
   width: 360px; max-height: 78vh; overflow: auto;
@@ -3044,7 +3046,6 @@ const CSS = `
   color: #e6edf3; background: rgba(13,17,23,.94);
   border: 1px solid #30363d; border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0,0,0,.55);
-  backdrop-filter: blur(10px);
 }
 .hd { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:move;
   border-bottom:1px solid #30363d; background:rgba(22,27,34,.9); border-radius:10px 10px 0 0; }
@@ -3275,6 +3276,7 @@ class PulseFloatingWidget {
     const style = document.createElement('style');
     style.textContent = `
       :host { all: initial; }
+      :host, *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
       .pill {
         position: fixed;
         z-index: 2147483646;
@@ -3287,11 +3289,9 @@ class PulseFloatingWidget {
         color: #e6edf3;
         border: 1px solid rgba(56, 139, 253, 0.45);
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 12px rgba(56, 139, 253, 0.2);
-        backdrop-filter: blur(12px);
         font: 12px/1.4 "SF Mono", ui-monospace, Consolas, monospace;
         cursor: move;
         user-select: none;
-        transition: border-color 0.2s, box-shadow 0.2s;
       }
       .pill:hover {
         border-color: rgba(56, 139, 253, 0.85);
@@ -3301,12 +3301,6 @@ class PulseFloatingWidget {
         font-size: 15px;
         line-height: 1;
         color: #fbbf24;
-        filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.6));
-        animation: pulse-glow 2s infinite ease-in-out;
-      }
-      @keyframes pulse-glow {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.5)); }
-        50% { transform: scale(1.18); filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.85)); }
       }
       .lbl {
         font-size: 11px;
@@ -3331,7 +3325,6 @@ class PulseFloatingWidget {
         height: 100%;
         width: 100%;
         border-radius: 3px;
-        transition: width 0.4s ease, background-color 0.4s ease;
       }
       .btn-refresh {
         cursor: pointer;
@@ -3341,17 +3334,10 @@ class PulseFloatingWidget {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        transition: opacity 0.2s, transform 0.25s, color 0.2s;
       }
       .btn-refresh:hover {
         opacity: 1;
         color: #58a6ff;
-      }
-      .spinning {
-        animation: spin 0.65s linear infinite;
-      }
-      @keyframes spin {
-        100% { transform: rotate(360deg); }
       }
     `;
     this.shadow.appendChild(style);
@@ -3439,15 +3425,18 @@ class PulseFloatingWidget {
     });
 
     if (this.refreshBtn) {
-      this.refreshBtn.addEventListener('click', (e) => {
+      this.refreshBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        this.refreshBtn.classList.add('spinning');
-        if (typeof this.onRefresh === 'function') {
-          Promise.resolve(this.onRefresh()).finally(() => {
-            setTimeout(() => this.refreshBtn.classList.remove('spinning'), 500);
-          });
-        } else {
-          setTimeout(() => this.refreshBtn.classList.remove('spinning'), 500);
+        if (this.refreshBtn.getAttribute('aria-busy') === 'true' || typeof this.onRefresh !== 'function') return;
+        this.refreshBtn.setAttribute('aria-busy', 'true');
+        this.refreshBtn.setAttribute('title', '正在刷新精力值…');
+        try {
+          await this.onRefresh();
+          this.refreshBtn.setAttribute('title', '点击刷新精力值');
+        } catch {
+          this.refreshBtn.setAttribute('title', '刷新失败，点击重试');
+        } finally {
+          this.refreshBtn.removeAttribute('aria-busy');
         }
       });
     }
