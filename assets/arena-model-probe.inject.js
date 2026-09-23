@@ -5936,7 +5936,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
   var BUS = __req("interceptor").BUS;
   const target = name => typeof name === 'string' && /astra|fable/i.test(name);
   // Secondary targets do not stop the loop; a hit only lengthens the post-round wait.
-  const secondary = name => typeof name === 'string' && !target(name) && /sol|opus|glm[\s._-]*5[\s._-]*3|gemini/i.test(name);
+  const secondary = name => typeof name === 'string' && !target(name) && /sol|opus|gemini/i.test(name);
   const ROUND_WAIT_MS = 0, SECONDARY_WAIT_MS = 40000;
   const roundWait = name => secondary(name) ? SECONDARY_WAIT_MS : ROUND_WAIT_MS;
   // 模型名迟迟识别不出来通常是页面渲染慢或 DOM 结构临时变化，属于可恢复的偶发
@@ -6319,7 +6319,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     window.__AMP_PAGE_GACHA__?.dispose?.();
     const root=document.createElement('aside');root.id='amp-target-gacha';
     root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / GLM5.3 / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
+    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
     const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
     const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},

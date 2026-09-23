@@ -16,9 +16,11 @@ function setup(){
  const until=phase=>{for(let n=0;n<200 && runner.state().phase!==phase;n++)step();assert.equal(runner.state().phase,phase);};
  return {runner,v,facts,calls,step,until,time:()=>time};
 }
-test('secondary matcher: sol, opus, GLM5.3 (variants) and gemini, case-insensitive; primary wins',()=>{
+const GLM53_VARIANTS=['GLM5.3','glm-5.3','GLM 5.3-pro','glm_5_3','glm-5-3','glm-5.3-flash','contenders/glm-5.3-agent'];
+test('secondary matcher: sol, opus and gemini; GLM5.3 variants excluded; primary wins',()=>{
  const m=load();
- for(const n of ['Sol-1','claude-opus-4','GLM5.3','glm-5.3','GLM 5.3-pro','gemini-2.5-flash','x-OPUS'])assert.equal(m.secondary(n),true,n);
+ for(const n of ['Sol-1','claude-opus-4','gemini-2.5-flash','x-OPUS'])assert.equal(m.secondary(n),true,n);
+ for(const n of GLM53_VARIANTS){assert.equal(m.secondary(n),false,n);assert.equal(m.roundWait(n),0,n);}
  for(const n of ['','gpt-5',null,'GLM4.5','glm-5.2','solo'.slice(0,2)+'ar'.slice(1)])assert.equal(m.secondary(n),false,n);
  assert.equal(m.secondary('astra-sol'),false,'primary target is never secondary');
   assert.equal(m.roundWait('gemini'),40000);assert.equal(m.roundWait('other'),0);
@@ -34,10 +36,15 @@ test('secondary target does not stop: waits 40 seconds after completion then ope
  assert.equal(e.calls.filter(c=>c.name==='new').length,1);assert.ok(e.time()-end>=40000);
  assert.equal(e.runner.state().round,1);
 });
-test('ordinary non-target opens next round immediately without 10 second wait',()=>{
- const e=setup();e.runner.start('你好');finish(e,'gpt-5');const end=e.time();
+for(const model of ['gpt-5',...GLM53_VARIANTS])test(`ordinary ${model} opens next round without secondary cooldown`,()=>{
+ const e=setup();e.runner.start('你好');finish(e,model);const end=e.time();
+ assert.equal(e.runner.state().status,'running');assert.doesNotMatch(e.runner.state().message,/次要目标|40 秒/);
  e.step(800);e.step();
  assert.equal(e.calls.filter(c=>c.name==='new').length,1);assert.ok(e.time()-end<2000);
+});
+test('panel description only lists the remaining secondary targets',()=>{
+ assert.ok(source.includes('次要目标 sol / opus / gemini 不停止'));
+ assert.ok(!source.includes('次要目标 sol / opus / GLM5.3 / gemini'));
 });
 test('primary target containing a secondary keyword stops as a match',()=>{
  const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.facts.model='astra-opus';e.step();
