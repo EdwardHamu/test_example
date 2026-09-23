@@ -1,0 +1,23 @@
+PASS server USD fields retain precision
+PASS no credits-to-USD conversion
+PASS missing snapshot remains unavailable
+PASS partial charge rejected
+PASS latest turn without cost does not fall back
+PASS newest cost missing amount does not fall back
+PASS zero allowance is not a missing value
+PASS negative remaining balance supported
+PASS nonfinite and string amounts rejected
+PASS partial collection is not a settled balance
+PASS successful bound auto snapshot
+PASS other page rejected
+PASS other generation rejected
+PASS other run rejected
+PASS turn baseline rejected
+PASS new trace turn invalidates old quota
+PASS desktop sanitized snapshot supported
+PASS new missing snapshot supersedes old data
+PASS no arbitrary secrets propagated
+PASS read time must be valid
+PASS network failure is explicitly labelled
+PASS adapter has no network or storage calls
+22 offline tests passed. No browser session, network request or business action was used.

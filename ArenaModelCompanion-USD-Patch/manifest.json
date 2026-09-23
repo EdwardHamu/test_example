@@ -1,0 +1,9 @@
+{
+  "package": "ArenaModelCompanion-USD-Patch",
+  "version": "1.0.0",
+  "date": "2026-09-22",
+  "file": "assets/arena-model-probe.inject.js",
+  "originalSha256": "42e56c34b4b342f25861b63b93bb54226f3b85f18bb007bfb8e00c605fb38b68",
+  "patchedSha256": "db3c8011c3b47557d06fcdfb27a641143ca3f3f8e41e67c10644fb28dd6a1316",
+  "scope": "Single asset patch only; no EXE, Data, Browser or account changes."
+}
