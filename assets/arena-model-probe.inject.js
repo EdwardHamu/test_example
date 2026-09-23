@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.4+assets-9.17.13-pulse-float-catalog-20260922 — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.4+assets-9.17.15-pulse-float-catalog-usd-20260923 — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -61,6 +61,51 @@ function summarizeReasoning(evidence = []) {
   exp.extractReasoning = extractReasoning;
   exp.summarizeReasoning = summarizeReasoning;
 } };
+// USD snapshot adapter. Pure, allowlisted; no network, credentials or persistence.
+__mods["usd-quota"] = { fn: function (exp) {
+  const finite = n => typeof n === 'number' && Number.isFinite(n);
+  const label = s => typeof s === 'string' && s.length <= 120 && !/[\u0000-\u001f\u007f]/.test(s) && !/Bearer |^eyJ/.test(s) ? s : null;
+  function extract(detail) {
+    const spans = Array.isArray(detail?.spans) ? detail.spans.slice(0,24) : [];
+    const turns = spans.map(s=>s?.turn).filter(n=>Number.isSafeInteger(n)&&n>0);
+    const turn = turns.length ? Math.max(...turns) : null;
+    const checkedAt = typeof detail?.checkedAt === 'string' && detail.checkedAt.length <= 40 && Number.isFinite(Date.parse(detail.checkedAt)) ? detail.checkedAt : null;
+    const result = {turn,checkedAt,status:'unavailable',quota:null};
+    if (!turn || !checkedAt) return result;
+    // Never fall back to an older turn when the newest turn lacks a settled charge.
+    const costs = spans.filter(s=>s?.turn===turn&&s.kind==='cost');
+    const last = costs[costs.length-1];
+    if (!last || last.partial !== false || detail.limited || detail.stopped) return result;
+    const v = last.values || {};
+    if (!finite(v.allowanceUsd) || v.allowanceUsd < 0 || !finite(v.balanceRemainingUsd)) return result;
+    result.status = 'ready';
+    result.quota = {
+      allowanceUsd:v.allowanceUsd, balanceRemainingUsd:v.balanceRemainingUsd,
+      chargedUserTotalUsd:finite(v.chargedUserTotalUsd)&&v.chargedUserTotalUsd>=0 ? v.chargedUserTotalUsd : null,
+      allowanceTier:label(v.allowanceTier),allowanceSource:label(v.allowanceSource),
+      windowStartAtMs:Number.isSafeInteger(v.windowStartAtMs)&&v.windowStartAtMs>=0&&v.windowStartAtMs<=8640000000000000 ? v.windowStartAtMs : null,
+      overLimit:typeof v.overLimit==='boolean'?v.overLimit:null
+    };
+    return result;
+  }
+  function select(run, desktop, url, generation) {
+    const empty={status:'unavailable',quota:null,checkedAt:null,turn:null};
+    if (!/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}\/?$/i.test(url)||!run?.runId) return empty;
+    const candidates=[];
+    for(const x of [run.automaticTrace,desktop]) {
+      if(!x||x.url!==url||x.runId!==run.runId||x.generation!==generation)continue;
+      const snapshot=x.quotaSnapshot||extract(x.detail);
+      if(!snapshot.turn||snapshot.turn<=(run.minTurn||0))continue;
+      candidates.push(snapshot);
+    }
+    candidates.sort((a,b)=>b.turn-a.turn||(Date.parse(b.checkedAt)||0)-(Date.parse(a.checkedAt)||0));
+    const s=candidates[0];
+    if(!s||s.turn<(run.lastSeenTurn||0))return empty;
+    return {...s,quota:s.quota?{...s.quota}:null,warning:run.lastError?'最近采集失败，此金额可能滞后':null};
+  }
+  exp.extract=extract;exp.select=select;
+} };
+
 __mods["trace-summary"] = { fn: function (exp) {
   var EFFORT_LEVELS = __req("reasoning").EFFORT_LEVELS;
   var summarizeReasoning = __req("reasoning").summarizeReasoning;
@@ -205,7 +250,9 @@ const FIELDS = {
   },
   cost: {
     modelName: ['modelName', label], messageId: ['messageId', id], costUsd: ['costUsd', amount], effectiveCostUsd: ['effectiveCostUsd', amount], chargedUsd: ['chargedUsd', amount], effectiveChargedUsd: ['effectiveChargedUsd', amount],
-    pricingStrategy: ['pricingStrategy', label], costSource: ['costSource', label], costKind: ['costKind', label], costIsFallback: ['costIsFallback', flag], costIsLongContext: ['costIsLongContext', flag], unpriced: ['unpriced', flag]
+    pricingStrategy: ['pricingStrategy', label], costSource: ['costSource', label], costKind: ['costKind', label], costIsFallback: ['costIsFallback', flag], costIsLongContext: ['costIsLongContext', flag], unpriced: ['unpriced', flag],
+    allowanceUsd: ['allowanceUsd', amount], balanceRemainingUsd: ['balanceRemainingUsd', number], chargedUserTotalUsd: ['chargedUserTotalUsd', amount],
+    allowanceTier: ['allowanceTier', label], allowanceSource: ['allowanceSource', label], windowStartAtMs: ['windowStartAtMs', count], overLimit: ['overLimit', flag]
   }
 };
 // Keys whose presence (not value) is worth knowing when hunting for reasoning-effort style settings.
@@ -6378,6 +6425,104 @@ __mods["gacha-cooldown"] = { fn: function (exp) {
   exp.WAIT_MS = WAIT_MS;
   exp.createCooldown = createCooldown;
 } };
+/* USD quota card port: read-only, same-page snapshots; no additional network or storage. */
+__mods["usd-quota-panel"] = { fn: function (exp) {
+  function install() {
+    if(typeof window==='undefined'||typeof document==='undefined'||typeof location==='undefined'
+      ||location.origin!=='https://arena.ai'||window.top!==window)return null;
+    const KEY='__ARENA_USD_QUOTA_CARD_V1__';
+    const CARD_VERSION='usd-quota-card.2';
+    const previous=window[KEY];
+    if(previous?.version===CARD_VERSION&&typeof previous.refresh==='function'){previous.refresh();return previous;}
+    if(previous){
+      if(typeof previous.dispose==='function')previous.dispose();
+      else if(typeof previous.refresh==='function'){
+        console.warn('[amp] 旧版 USD 卡片不支持卸载，请刷新页面后重新注入以启用防闪烁修复。');
+        return previous;
+      }
+    }
+    let card=null,owner=null,disposed=false,watchedRoots=[];
+    // Host innerHTML updates remove the card. Restore it at the mutation checkpoint,
+    // before paint, rather than leaving a blank until the one-second data timer.
+    const observer=typeof MutationObserver==='function'?new MutationObserver(()=>{
+      if(disposed||card?.isConnected&&card.parentNode===owner)return;
+      refresh();
+    }):null;
+    function watchRoots(monitor,hud){
+      if(!observer)return;
+      const roots=[document,monitor,hud].filter(Boolean);
+      if(roots.length===watchedRoots.length&&roots.every((root,i)=>root===watchedRoots[i]))return;
+      observer.disconnect();watchedRoots=roots;
+      for(const root of roots)observer.observe(root,{childList:true,subtree:true});
+    }
+    const money=n=>typeof n==='number'&&Number.isFinite(n)?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'未提供';
+    const exact=n=>typeof n==='number'&&Number.isFinite(n)?'$'+n.toLocaleString('en-US',{maximumFractionDigits:8}):'未提供';
+    const stamp=n=>n!==null&&n!==undefined&&Number.isFinite(new Date(n).getTime())?new Date(n).toLocaleString('zh-CN',{hour12:false}):'未提供';
+    function mount(){
+      const monitor=document.getElementById('arena-right-model-monitor')?.shadowRoot;
+      const hud=document.getElementById('amp-hud')?.shadowRoot;
+      watchRoots(monitor,hud);
+      const content=monitor?.querySelector('.content')||hud?.querySelector('.bd');
+      if(!content){card?.remove();owner=null;return false;}
+      if(!card){
+        card=document.createElement('section');card.className='usd-card';card.setAttribute('aria-label','美元账户额度快照');
+        card.innerHTML=`<style>
+  .usd-card{margin:0 0 14px;padding:15px 13px;border:1px solid #46533f;border-radius:12px;background:linear-gradient(135deg,#2b362a,#232a24);color:#eef4e9;font:12px/1.6 system-ui,"Microsoft YaHei",sans-serif;--quota-color:#a9d58e}
+  .usd-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:14px}.usd-title{font-size:13px;font-weight:650}.usd-tag{font-size:10px;color:#b8c7b1;border:1px solid #58684d;border-radius:20px;padding:1px 7px}.usd-body{display:flex;align-items:center;gap:12px}.usd-ring{position:relative;width:80px;height:80px;flex-shrink:0}.usd-ring svg{width:100%;height:100%;transform:rotate(-90deg)}.usd-track{stroke:#40503c}.usd-bar{stroke:var(--quota-color);stroke-linecap:round}.usd-percent{position:absolute;inset:0;display:grid;place-items:center;font-weight:650;font-size:18px;color:var(--quota-color)}.usd-main{min-width:0}.usd-caption{font-size:10px;color:#afbea8}.usd-amount{font-size:24px;line-height:1.3;letter-spacing:-.6px;font-weight:650;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.usd-total{font-size:12px;color:#b5c3ad;margin-top:4px}.usd-details{margin:12px 0 0}.usd-line{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #3b4737}.usd-line dt{color:#a9b6a3;flex-shrink:0}.usd-line dd{margin:0;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.usd-note{margin-top:10px;color:#acbba6;font-size:10px;overflow-wrap:anywhere}.usd-warning{color:#edc382;font-size:11px;margin-top:8px}.usd-card[data-state=empty]{--quota-color:#9ca89a}.usd-card[data-state=low]{--quota-color:#e89e8a}.usd-card[data-state=warn]{--quota-color:#edc382}
+  </style><div class="usd-head"><span class="usd-title">美元账户额度</span><span class="usd-tag">USD · 记录快照</span></div><div class="usd-body"><div class="usd-ring"><svg viewBox="0 0 88 88" aria-hidden="true"><circle class="usd-track" cx="44" cy="44" r="37" fill="none" stroke-width="6"/><circle data-usd="bar" class="usd-bar" cx="44" cy="44" r="37" fill="none" stroke-width="6" stroke-dasharray="232.478" stroke-dashoffset="232.478"/></svg><span class="usd-percent" data-usd="percent">—</span></div><div class="usd-main"><div class="usd-caption">剩余金额</div><div class="usd-amount" data-usd="remaining">未提供</div><div class="usd-total" data-usd="total">总额度 未提供</div></div></div><dl class="usd-details"><div class="usd-line"><dt>累计已用</dt><dd data-usd="used">未提供</dd></div><div class="usd-line"><dt>额度档位</dt><dd data-usd="tier">未提供</dd></div><div class="usd-line"><dt>窗口起始</dt><dd data-usd="window">未提供</dd></div><div class="usd-line"><dt>记录读取时间</dt><dd data-usd="checked">未读取</dd></div></dl><div class="usd-warning" data-usd="warning"></div><div class="usd-note" data-usd="note">等待本会话的服务端记账记录；不自动发送消息。</div>`;
+      }
+      owner=content;
+      if(card.parentNode!==content)content.prepend(card);
+      return true;
+    }
+    const el=id=>card.querySelector('[data-usd="'+id+'"]');
+    const text=(id,value)=>{const node=el(id),s=String(value);if(node.textContent!==s)node.textContent=s;};
+    const attr=(id,name,value)=>{
+      const node=el(id);
+      if(value===null){if(node.getAttribute(name)!==null)node.removeAttribute(name);}
+      else {const s=String(value);if(node.getAttribute(name)!==s)node.setAttribute(name,s);}
+    };
+    const setState=value=>{if(card.dataset.state!==value)card.dataset.state=value;};
+    function empty(note){
+      setState('empty');text('percent','—');text('remaining','未提供');text('total','总额度 未提供');
+      for(const id of ['used','tier','window'])text(id,'未提供');text('checked','未读取');text('warning','');text('note',note);
+      attr('bar','stroke-dashoffset','232.478');for(const id of ['remaining','used','total'])attr(id,'title',null);
+    }
+    function refresh(){
+      if(disposed)return;
+      try{
+        if(!mount())return;
+        if(!/^\/agent\/[0-9a-f-]{36}\/?$/i.test(location.pathname)){empty('打开 Agent 会话后，显示该会话最近一次已采集的记账快照。');return;}
+        const api=window.__MODEL_PROBE__;
+        if(typeof api?.usdQuotaSnapshot!=='function'){empty('美元额度适配器尚未加载，请完全退出软件后重新启动。');return;}
+        const s=api.usdQuotaSnapshot(),q=s?.quota;
+        if(s?.status!=='ready'||!q){empty('尚无本轮完整美元额度记录。正常使用并完成一轮回答后，随原探针采集更新；不会额外发送消息。');return;}
+        const ratio=q.allowanceUsd>0?q.balanceRemainingUsd/q.allowanceUsd*100:null;
+        const pct=Number.isFinite(ratio)?ratio:null;
+        setState(q.overLimit||q.balanceRemainingUsd<0?'low':pct===null?'empty':pct>=50?'good':pct>=20?'warn':'low');
+        text('percent',pct===null?'—':pct.toLocaleString('en-US',{maximumFractionDigits:1,useGrouping:false})+'%');
+        attr('bar','stroke-dashoffset',String(232.478*(1-Math.min(100,Math.max(0,pct||0))/100)));
+        text('remaining',money(q.balanceRemainingUsd));attr('remaining','title',exact(q.balanceRemainingUsd));
+        text('total','总额度 '+money(q.allowanceUsd));attr('total','title',exact(q.allowanceUsd));
+        text('used',money(q.chargedUserTotalUsd));attr('used','title',exact(q.chargedUserTotalUsd));
+        text('tier',[q.allowanceTier,q.allowanceSource].filter(Boolean).join(' · ')||'未提供');
+        text('window',stamp(q.windowStartAtMs));text('checked',stamp(s.checkedAt));
+        const age=Date.now()-Date.parse(s.checkedAt);
+        text('warning',[q.overLimit===true?'记录标记：账户额度已超限':'',s.warning||'',age>300000?'快照已超过 5 分钟，不代表当前实时余额':''].filter(Boolean).join('；'));
+        text('note','来源：本会话第 '+s.turn+' 轮 spend.recorded（服务端记账）。不是现金余额，不从 credits 换算，也不累计多个快照。金额保留两位小数，悬停可看更高精度。');
+      }catch(_){if(card)empty('额度数据暂不可用；原有聊天和模型监测功能不受此卡片控制。');}
+    }
+    const timer=setInterval(refresh,1000);
+    const controller={version:CARD_VERSION,refresh,dispose(){
+      if(disposed)return;
+      disposed=true;clearInterval(timer);observer?.disconnect();watchedRoots=[];card?.remove();card=null;owner=null;
+      if(window[KEY]===controller)delete window[KEY];
+    }};
+    window[KEY]=controller;refresh();return controller;
+  }
+  exp.mount=install;
+} };
+
 __mods["main"] = { fn: function (exp) {
   var createCooldown = __req("gacha-cooldown").createCooldown;
   var latestTraceSummary = __req("trace-summary").latestTraceSummary;
@@ -6427,7 +6572,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.13-pulse-float-catalog-20260922';
+const VERSION = '1.2.4+assets-9.17.15-pulse-float-catalog-usd-20260923';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
@@ -6817,13 +6962,15 @@ function boot(opts = {}) {
     classify: () => recompute('api'),
     reasoning: () => currentFacts().effort,
     desktopFacts: () => currentFacts(),
+    // USD-only snapshot, bound to the current page, run, generation and turn.
+    usdQuotaSnapshot: () => __req("usd-quota").select(runState(), desktopDetail, location.origin + location.pathname, BUS.generation),
     acceptTraceDetail: (context, detail) => {
       if (!context || !/^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/.test(context.url || '')
         || context.url !== location.origin + location.pathname || context.runId !== runState().runId
         || context.generation !== BUS.generation) return false;
       const clean = sanitizeDetail(detail);
       if (!clean) return false;
-      desktopDetail = {...context, summary: latestTraceSummary(clean)};
+      desktopDetail = {...context, summary: latestTraceSummary(clean), quotaSnapshot: __req("usd-quota").extract(clean)};
       recompute('trace-detail');
       return true;
     },
@@ -6932,6 +7079,8 @@ function boot(opts = {}) {
   for (const evt of BUS.pendingHeaders.splice(0)) BUS.emit(evt);
   recompute('boot');
   try { window.__MODEL_PROBE__ = api; } catch { /* noop */ }
+  try { __req("usd-quota-panel").mount(); }
+  catch (err) { console.warn('[amp] USD 额度卡片初始化失败；原有探针功能仍可使用:', err); }
   const mountGacha = () => {
     if (window.__MODEL_PROBE__ !== api) return;
     try {
