@@ -2728,6 +2728,7 @@ const IRRELEVANT_PATH_RE = /(?:rum\/|_vercel\/insights|\/cdn-cgi\/|\/survey|\/fe
  * 请求阻断与去噪规则 (从 Arena Pro 反向迁移：拦截 Datadog / PostHog / Cloudflare Beacon / GA 等)
  * ------------------------------------------------------------------ */
 const BLOCK_RULES = [
+  { name: 'Arena billing balance', match: isBalancePath },
   { name: 'Datadog RUM', match: (url) => url.includes('datadoghq.com') },
   { name: 'PostHog Events', match: (url) => url.includes('/rpc/e/') || url.includes('/rpc/i/v0/e/') },
   { name: 'PostHog Autocapture', match: (url) => url.includes('/rpc/static/exception-autocapture') || url.includes('/rpc/static/dead-clicks') || url.includes('/rpc/static/web-vitals') },
@@ -2735,6 +2736,11 @@ const BLOCK_RULES = [
   { name: 'Cloudflare Beacon', match: (url) => url.includes('cloudflareinsights.com/beacon.min.js') },
   { name: 'Google Analytics', match: (url) => url.includes('googletagmanager.com') || url.includes('google-analytics.com') }
 ];
+
+function isBalancePath(url) {
+  try { return new URL(url, location.href || location.origin + '/').pathname === '/api/billing/balance'; }
+  catch { return false; }
+}
 
 function checkBlock(url) {
   if (!url || typeof url !== 'string') return null;
@@ -3229,6 +3235,7 @@ function installSocketHook() {
     let OW = window.WebSocket;
     while (OW.__orig) OW = OW.__orig;
     const W = function (url, protocols) {
+      if (isBalancePath(url)) throw new TypeError('Blocked balance endpoint');
       const ws = new OW(url, protocols);
       const slot = inferSlot();
       try {
@@ -3257,6 +3264,7 @@ function installSocketHook() {
     let OE = window.EventSource;
     while (OE.__orig) OE = OE.__orig;
     const E = function (url, cfg) {
+      if (isBalancePath(url)) throw new TypeError('Blocked balance endpoint');
       const es = new OE(url, cfg);
       const slot = inferSlot();
       try {
@@ -6597,7 +6605,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.17-usd-retain-20260924';
+const VERSION = '1.2.4+assets-9.17.17-usd-retain-balance-block-20260924';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;

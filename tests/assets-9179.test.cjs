@@ -74,20 +74,14 @@ function balance(fetch,origin='https://arena.ai') {
  return {action,jobs};
 }
 const flush=()=>new Promise(r=>setImmediate(r));
-test('balance fetch is same-origin and exposes only validated credit fields',async()=>{
- let calls=0;const b=balance(async(u,o)=>{calls++;assert.equal(u,'/api/billing/balance');assert.equal(o.credentials,'same-origin');assert.equal(o.redirect,'error');return {ok:true,status:200,headers:{get:()=> 'application/json'},json:async()=>({creditsRemaining:20,dailyFreeCredits:5,refreshedAt:'2026-09-17T00:00:00Z',secret:'PRIVATE'})};});
- assert.equal(b.action('start','one').status,'pending');await flush();const result=b.action('read','one');assert.equal(result.status,'ready');assert.equal(result.creditsRemaining,20);assert.ok(!JSON.stringify(result).includes('PRIVATE'));b.action('start','one');assert.equal(calls,1);assert.equal(b.jobs.size,0);
-});
-for(const [status,result] of [[401,'signed-out'],[403,'forbidden'],[429,'rate-limited'],[500,'server-error']])test(`balance handles HTTP ${status} without retry`,async()=>{
- let calls=0;const b=balance(async()=>{calls++;return {ok:false,status};});b.action('start','id');await flush();assert.equal(b.action('read','id').status,result);assert.equal(calls,1);
+test('balance endpoint is disabled without starting a request or timeout',()=>{
+  let calls=0;const b=balance(async()=>{calls++;throw Error('must not fetch');});
+  assert.equal(b.action('read','one').status,'missing');
+  assert.equal(b.action('start','one').status,'unavailable');
+  assert.equal(b.action('read','one').status,'unavailable');
+  assert.equal(b.action('start','two').status,'unavailable');
+  assert.equal(calls,0);assert.equal(b.jobs.size,0);
 });
 test('balance rejects a foreign origin without network access',()=>{
  let calls=0;const b=balance(async()=>{calls++;},'https://example.com');assert.equal(b.action('start','id').status,'unavailable');assert.equal(calls,0);
-});
-test('balance rejects malformed credit values',async()=>{
- const b=balance(async()=>({ok:true,status:200,headers:{get:()=> 'application/json'},json:async()=>({creditsRemaining:-1,dailyFreeCredits:5})}));b.action('start','id');await flush();assert.equal(b.action('read','id').status,'invalid');
-});
-test('balance timeout aborts pending fetch and late responses cannot overwrite it',async()=>{
- let resolve,signal;const b=balance((u,o)=>{signal=o.signal;return new Promise(r=>resolve=r);});b.action('start','id');for(const f of b.jobs.values())f();assert.equal(signal.aborted,true);assert.equal(b.action('read','id').status,'timeout');
- resolve({ok:true,status:200,headers:{get:()=> 'application/json'},json:async()=>({creditsRemaining:20,dailyFreeCredits:5})});await flush();assert.equal(b.action('read','id').status,'timeout');
 });
