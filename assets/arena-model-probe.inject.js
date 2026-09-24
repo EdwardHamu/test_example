@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.4+assets-9.17.15-pulse-float-catalog-usd-20260923 — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.4+assets-9.17.16-gacha-choice-20260924 — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -5750,7 +5750,7 @@ __mods["choice-alert"] = { fn: function (exp) {
   }
   exp.CARD_SELECTOR = CARD_SELECTOR;
   exp.findPendingMessages = findPendingMessages;
-  exp.detected = () => findPendingMessages().length > 0;
+  exp.detected = scope => findPendingMessages().some(message => !scope || message.closest('[role="log"]') === scope);
   exp.playChoice = playChoice;
   exp.start = start;
 } };
@@ -5758,7 +5758,7 @@ __mods["choice-alert"] = { fn: function (exp) {
 __mods["page-bridge"] = { fn: function (exp) {
   exp.ensure = () => {
     const b = window.__arenaCompanion;
-    if (b?.pageRunnerProtocol === 'amp-keystrokes-v1'
+    if (b?.pageRunnerProtocol === 'amp-keystrokes-v1' && b.pageRunnerChoiceCompletion === true
       && ['read','action','typeDraft','attachmentsReady'].every(k => typeof b[k] === 'function')) return b;
     // Install locally: no fetch, eval, script element or dependence on the desktop injection order.
 (() => {
@@ -5818,15 +5818,22 @@ __mods["page-bridge"] = { fn: function (exp) {
     const response = text.replace(prompt, '').trim();
     const live = completion(log);
     const stop = !!main && buttons(main).some(e=>label(e)==='Stop generating' && !e.closest('[role="log"]'));
+    const promptConfirmed = !!prompt && text.includes(prompt);
+    let choicePending = false;
+    if (window.__AMP_GACHA_OWNER__ && log && promptConfirmed
+      && /^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/i.test(location.href)) {
+      try { choicePending = window.__MODEL_PROBE__?.choiceDetected?.(log) === true; }
+      catch (_) { /* Detection errors must not bypass the generation guard. */ }
+    }
     const blocked = challenge ? '需要人机验证' :
       find('Log In') || (dialog && /Log In to your account|Log In or Create Account/.test(dialog.innerText)) ? '请先登录 Arena' :
       /too many requests|rate limit|try again later|quota exceeded|limit reached/i.test(alerts) ? '网站限流，请稍后继续' :
       termsDialog() ? '正在处理网站首次使用条款' : '';
     return {
-      url: location.href, main: !!main, conversation: !!text, promptConfirmed: !!prompt && text.includes(prompt),
+      url: location.href, main: !!main, conversation: !!text, promptConfirmed,
       thinking: !!log && buttons(log).some(e => /^(Thinking\b|Thought\b|思考|已思考)/i.test(label(e))),
       generating: live ? live.busy || (!live.complete && stop) : stop,
-      generationKnown: !!live, responseComplete: !!live?.complete,
+      generationKnown: !!live, responseComplete: !!live?.complete, choicePending,
       failed: !!live?.failed || /(?:^|\n)(?:Stopped|Generation stopped|Error|Something went wrong)(?:\n|$)/i.test(response),
       response: response.length > 20 && !/^(finding|waiting|initializ|starting)/i.test(response),
       responseSignature: response.length + ':' + Array.from(response.slice(-320)).slice(-160).join(''),
@@ -5842,6 +5849,7 @@ __mods["page-bridge"] = { fn: function (exp) {
   };
   window.__arenaCompanion = {
     pageRunnerProtocol: 'amp-keystrokes-v1',
+    pageRunnerChoiceCompletion: true,
     read: view,
     hasDialog: () => dialogs().length > 0,
     attachmentsReady: names => {
@@ -5919,7 +5927,7 @@ __mods["page-bridge"] = { fn: function (exp) {
           throw Error(v.blocker || "请先手动处理网页弹窗");
       }
       if (gacha) {
-        if (name==='new' && v.generating) return {waiting:true};
+        if (name==='new' && v.generating && !(owner && v.choicePending)) return {waiting:true};
         if (v.attachmentNames.length) throw Error('当前有附件，已保留；抽卡不会夹带附件');
         if (loading()) return {waiting:true, reason:'page-loading'};
         if (v.draft && (name==='new' || v.draft!==prompt)) throw Error('当前有其他草稿，已保留');
@@ -5956,7 +5964,7 @@ __mods["page-bridge"] = { fn: function (exp) {
         const b = find('Stop generating', document.querySelector('main'));
         if (b) b.click();
       } else if (name === 'new') {
-        if (v.generating) throw new Error('请先停止当前生成');
+        if (v.generating && !(gacha && owner && v.choicePending)) throw new Error('请先停止当前生成');
         const links = [...document.querySelectorAll('a[href="/agent"]')].filter(e => visible(e) && label(e) === 'New Chat');
         if (links.length !== 1) throw new Error('请展开左侧栏，显示 New Chat 按钮');
         links[0].click();
@@ -6217,7 +6225,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
             if(!v.main)return;
             if(v.attachmentNames?.length){pause('恢复时检测到附件，保留现场');return;}
             // 刷新瞬间可能仍有上一轮回答在生成：等它结束并尽量补记模型名。
-            if(v.generating){
+            if(v.generating && !v.choicePending){
               resumeUntil=Math.max(resumeUntil,now()+RESUME_GRACE_MS);
               if(f.model && f.modelUrl===v.url){
                 s.model=f.model;
@@ -6249,7 +6257,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
             break;
           }
           case 'prepare':
-            if(v.generating || v.draft) {pause('当前有生成或草稿，未覆盖');return;}
+            if((v.generating && !v.choicePending) || v.draft) {pause('当前有生成或草稿，未覆盖');return;}
             if(!v.main)return;
             if(v.conversation) {
               if(!v.newLinks && v.canExpand && !expanded){if(action('expand')){expanded=true;phase('prepare',800);}return;}
@@ -6330,10 +6338,11 @@ __mods["gacha-runner"] = { fn: function (exp) {
               }
               if(firstSeen && secondary(f.model)) report('次要目标 '+f.model+'，本轮结束后等待 40 秒再继续');
             }
-            if(!v.generating && v.responseComplete){
+            if(v.choicePending || (!v.generating && v.responseComplete)){
               if(endedAt===null){
                 endedAt=now();
-                report(secondary(s.model)?'回答完成（次要目标 '+s.model+'），等待 40 秒冷却':(s.model?'回答完成，未命中，准备下一轮':'回答完成，等待真实模型名'));
+                const done=v.choicePending?'出现待选项，视为本轮完成':'回答完成';
+                report(secondary(s.model)?done+'（次要目标 '+s.model+'），等待 40 秒冷却':(s.model?done+'，未命中，准备下一轮':done+'，等待真实模型名'));
               }
               if(now()-endedAt>120000 && !s.model){skipRoundOnModelTimeout('未识别到本轮真实模型名');return;}
               if(s.model && now()-endedAt>=roundWait(s.model)){
@@ -6366,7 +6375,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     window.__AMP_PAGE_GACHA__?.dispose?.();
     const root=document.createElement('aside');root.id='amp-target-gacha';
     root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。检测出模型后立即进入下一轮；遇到弹窗等待5秒重试(最多5次)；次要目标 sol / opus / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
+    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。待选项卡视为本轮完成；其他弹窗等待5秒重试(最多5次)；次要目标 sol / opus / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
     const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
     const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
@@ -6572,7 +6581,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.15-pulse-float-catalog-usd-20260923';
+const VERSION = '1.2.4+assets-9.17.16-gacha-choice-20260924';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
@@ -6948,7 +6957,7 @@ function boot(opts = {}) {
   const api = {
     version: VERSION,
     captchaDetected: () => __req("captcha-alert").detected(),
-    choiceDetected: () => __req("choice-alert").detected(),
+    choiceDetected: scope => __req("choice-alert").detected(scope),
     // The bridge marks confirmed completion, then polls this same monotonic deadline.
     gachaCooldown: (markEnded = false) => {
       if (markEnded) cooldown.ended(cooldownKey());

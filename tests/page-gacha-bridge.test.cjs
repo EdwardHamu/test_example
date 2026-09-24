@@ -31,3 +31,26 @@ test('handler edits to draft are preserved instead of duplicate insertion',()=>{
 test('owner loss during keydown cancels actual insertion',()=>{
  let p;p=page(e=>{if(e.type==='keydown')delete p.window.__AMP_GACHA_OWNER__;});assert.throws(()=>p.b.typeDraft('','a',p.owner),/改变/);assert.equal(p.writes.length,0);
 });
+test('only the current owned conversation choice can bypass a busy generation for New Chat',()=>{
+ const id='11111111-1111-1111-1111-111111111111',owner={};let pending=false,dialog=false,clicks=0;
+ const log={innerText:'prompt',getClientRects:()=>[{}],querySelectorAll:()=>[],
+  __reactFiberTest:{memoizedProps:{value:{id,status:'ready',messages:[{role:'assistant',parts:[{type:'dynamic-tool',state:'input-available'}]}]}}}};
+ const main={getClientRects:()=>[{}],querySelectorAll:s=>s==='[role="log"]'?[log]:[]};
+ const link={textContent:'New Chat',getAttribute:()=>null,getClientRects:()=>[{}],click(){clicks++;}};
+ const document={querySelectorAll:s=>s==='main'?[main]:s==='a[href="/agent"]'?[link]:
+  s==='[role="dialog"],[role="alertdialog"],dialog[open]'&&dialog?[{getClientRects:()=>[{}],innerText:'Other modal'}]:[],
+  querySelector:s=>s==='main'?main:null};
+ const window={__AMP_GACHA_OWNER__:owner,__MODEL_PROBE__:{
+  choiceDetected:scope=>{assert.equal(scope,log);return pending;},gachaCooldown:()=>({remainingMs:0}),captchaDetected:()=>false}};
+ vm.runInContext(src,vm.createContext({window,document,location:{href:'https://arena.ai/agent/'+id},getComputedStyle:()=>({visibility:'visible'})}));
+ const b=window.__arenaCompanion;
+ assert.equal(b.read('prompt').generating,true);assert.equal(b.read('prompt').responseComplete,false);
+ assert.equal(b.action('new','prompt',true,owner).waiting,true);
+ pending=true;
+ assert.equal(b.read('prompt').choicePending,true);
+ assert.equal(b.read('other prompt').choicePending,false);
+ assert.equal(b.action('new','other prompt',true,owner).waiting,true);
+ dialog=true;assert.equal(b.action('new','prompt',true,owner).reason,'dialog-present');dialog=false;
+ assert.throws(()=>b.action('new','prompt',false),/请先停止当前生成/);
+ assert.equal(b.action('new','prompt',true,owner).ok,true);assert.equal(clicks,1);
+});

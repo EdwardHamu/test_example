@@ -129,6 +129,15 @@ test('恢复时若上一轮仍在生成，先等待而不抢发新一轮',()=>{
   assert.equal(e.calls.length,0,'生成中不得发起任何操作');
 });
 
+test('恢复时当前会话出现待选项，按本轮完成继续下一轮',()=>{
+ const e=setup();
+ const rec={v:1,status:'running',prompt:'你好',round:4,model:'',savedAt:1000000};
+ e.v.url=session;e.v.conversation=true;e.v.generating=true;e.v.choicePending=true;e.v.promptConfirmed=true;
+ e.facts.model='other-model';e.facts.modelUrl=session;
+ assert.equal(e.runner.restore(rec),true);
+ e.step(2000);assert.equal(e.runner.state().phase,'prepare');
+ e.step(800);assert.equal(e.calls.at(-1).name,'new');
+});
 test('恢复时上一轮回答命中目标，立即停止而不开新一轮',()=>{
   const e=setup();
   const rec={v:1,status:'running',prompt:'你好',round:2,model:'',savedAt:1000000};

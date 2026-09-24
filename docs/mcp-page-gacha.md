@@ -54,3 +54,10 @@
 - 源码维护：修改 assets/PageBridge.js 后运行 `node sync-page-bridge.cjs`，同步探针内嵌副本；`node sync-page-bridge.cjs --check` 验证同步。比较时统一 CRLF/LF，写回时保留探针原换行风格。
 - 新增 tests/page-bridge-bootstrap.test.cjs 五项测试，包括真实模块装载、无桥接启动面板、旧版恢复、操作权保留及副本同步；全部 109 项通过，JS 语法、同步检查、git diff --check 通过，assets 诊断无错误/警告。
 - 仍未进行真实 WebView 联测；本次没有发起真实抽卡。需要刷新页面或重启应用加载修复后的探针，不需要先点桌面“开始抽卡”。
+
+## 待选项卡视为会话完成（2026-09-24）
+
+- 网页内抽卡持有操作权、提示词已在当前 Arena agent 会话的对话记录中确认时，复用 `choice-alert` 检测同一可见 `role="log"` 下尚待用户决策的选项卡；不扫描对话文字判断选项，不自动点击选项。
+- `gacha-runner` 在 `answer` 和刷新后的 `resume` 阶段将待选态视为本轮结束；即使 React 仍报告工具待处理/生成中也可准备下一轮。原有模型名来源绑定、主目标优先命中、次要目标 40 秒等待及未识别模型名的超时处理保持不变。
+- 桥接仅对持有操作权的网页抽卡开放这种 `New Chat` 例外；普通生成仍禁止切换。验证码、登录、限流、附件及普通网页弹窗的保护不变。`assets/PageBridge.js` 与 `assets/arena-model-probe.inject.js` 的内嵌桥接保持同步；旧桥接缺少 `pageRunnerChoiceCompletion` 标记时由探针离线更新。
+- 使用 `node --test tests/*.test.cjs`、`node sync-page-bridge.cjs --check` 和脚本语法检查验证。测试基于模拟页面及状态机，未在真实 Arena 页面执行抽卡；若站点更改待选卡片结构，应先核对真实 DOM 再调整检测规则。

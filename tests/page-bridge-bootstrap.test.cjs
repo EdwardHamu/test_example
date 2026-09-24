@@ -20,13 +20,14 @@ test('embedded bridge exactly matches canonical PageBridge.js',()=>{
 test('probe alone installs missing bridge without fetch, eval or starting a conversation',()=>{
  const e=setup();const bridge=e.c.req('page-bridge').ensure();assert.equal(bridge,e.window.__arenaCompanion);
  for(const k of ['read','action','typeDraft','attachmentsReady'])assert.equal(typeof bridge[k],'function');
- assert.equal(bridge.pageRunnerProtocol,'amp-keystrokes-v1');assert.equal(bridge.read('').draft,'');assert.equal(e.network(),0);assert.equal(e.edits(),0);
+ assert.equal(bridge.pageRunnerProtocol,'amp-keystrokes-v1');assert.equal(bridge.pageRunnerChoiceCompletion,true);assert.equal(bridge.read('').draft,'');assert.equal(e.network(),0);assert.equal(e.edits(),0);
 });
 test('legacy and incomplete bridges are replaced; compatible bridge is reused',()=>{
- for(const old of [{read(){},action(){}},{pageRunnerProtocol:'amp-keystrokes-v1',read(){},action(){}}]){
+ for(const old of [{read(){},action(){}},{pageRunnerProtocol:'amp-keystrokes-v1',read(){},action(){}},
+  {pageRunnerProtocol:'amp-keystrokes-v1',read(){},action(){},typeDraft(){},attachmentsReady(){}}]){
   const e=setup(old);const ensure=e.c.req('page-bridge').ensure;const first=ensure();assert.notEqual(first,old);assert.equal(ensure(),first);
  }
- const old={pageRunnerProtocol:'amp-keystrokes-v1',read(){},action(){},typeDraft(){},attachmentsReady(){}};
+ const old={pageRunnerProtocol:'amp-keystrokes-v1',pageRunnerChoiceCompletion:true,read(){},action(){},typeDraft(){},attachmentsReady(){}};
  const e=setup(old);assert.equal(e.c.req('page-bridge').ensure(),old);
 });
 test('later desktop overwrite or deletion self-recovers and preserves ownership token',()=>{

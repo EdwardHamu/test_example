@@ -42,6 +42,15 @@ for(const model of ['gpt-5',...GLM53_VARIANTS])test(`ordinary ${model} opens nex
  e.step(800);e.step();
  assert.equal(e.calls.filter(c=>c.name==='new').length,1);assert.ok(e.time()-end<2000);
 });
+test('pending choice also starts the secondary target 40-second wait',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);
+ e.facts.model='gemini-2.5-pro';e.v.generating=true;e.v.choicePending=true;e.v.responseComplete=false;e.step();
+ assert.equal(e.runner.state().phase,'answer');assert.match(e.runner.state().message,/待选项.*40 秒/);
+ const end=e.time();
+ e.step(39999);assert.equal(e.calls.filter(c=>c.name==='new').length,0);
+ e.step(1);e.until('opening');
+ assert.equal(e.calls.filter(c=>c.name==='new').length,1);assert.ok(e.time()-end>=40000);
+});
 test('panel description only lists the remaining secondary targets',()=>{
  assert.ok(source.includes('次要目标 sol / opus / gemini 不停止'));
  assert.ok(!source.includes('次要目标 sol / opus / GLM5.3 / gemini'));

@@ -55,15 +55,22 @@
     const response = text.replace(prompt, '').trim();
     const live = completion(log);
     const stop = !!main && buttons(main).some(e=>label(e)==='Stop generating' && !e.closest('[role="log"]'));
+    const promptConfirmed = !!prompt && text.includes(prompt);
+    let choicePending = false;
+    if (window.__AMP_GACHA_OWNER__ && log && promptConfirmed
+      && /^https:\/\/arena\.ai\/agent\/[0-9a-f-]{36}$/i.test(location.href)) {
+      try { choicePending = window.__MODEL_PROBE__?.choiceDetected?.(log) === true; }
+      catch (_) { /* Detection errors must not bypass the generation guard. */ }
+    }
     const blocked = challenge ? '需要人机验证' :
       find('Log In') || (dialog && /Log In to your account|Log In or Create Account/.test(dialog.innerText)) ? '请先登录 Arena' :
       /too many requests|rate limit|try again later|quota exceeded|limit reached/i.test(alerts) ? '网站限流，请稍后继续' :
       termsDialog() ? '正在处理网站首次使用条款' : '';
     return {
-      url: location.href, main: !!main, conversation: !!text, promptConfirmed: !!prompt && text.includes(prompt),
+      url: location.href, main: !!main, conversation: !!text, promptConfirmed,
       thinking: !!log && buttons(log).some(e => /^(Thinking\b|Thought\b|思考|已思考)/i.test(label(e))),
       generating: live ? live.busy || (!live.complete && stop) : stop,
-      generationKnown: !!live, responseComplete: !!live?.complete,
+      generationKnown: !!live, responseComplete: !!live?.complete, choicePending,
       failed: !!live?.failed || /(?:^|\n)(?:Stopped|Generation stopped|Error|Something went wrong)(?:\n|$)/i.test(response),
       response: response.length > 20 && !/^(finding|waiting|initializ|starting)/i.test(response),
       responseSignature: response.length + ':' + Array.from(response.slice(-320)).slice(-160).join(''),
@@ -79,6 +86,7 @@
   };
   window.__arenaCompanion = {
     pageRunnerProtocol: 'amp-keystrokes-v1',
+    pageRunnerChoiceCompletion: true,
     read: view,
     hasDialog: () => dialogs().length > 0,
     attachmentsReady: names => {
@@ -156,7 +164,7 @@
           throw Error(v.blocker || "请先手动处理网页弹窗");
       }
       if (gacha) {
-        if (name==='new' && v.generating) return {waiting:true};
+        if (name==='new' && v.generating && !(owner && v.choicePending)) return {waiting:true};
         if (v.attachmentNames.length) throw Error('当前有附件，已保留；抽卡不会夹带附件');
         if (loading()) return {waiting:true, reason:'page-loading'};
         if (v.draft && (name==='new' || v.draft!==prompt)) throw Error('当前有其他草稿，已保留');
@@ -193,7 +201,7 @@
         const b = find('Stop generating', document.querySelector('main'));
         if (b) b.click();
       } else if (name === 'new') {
-        if (v.generating) throw new Error('请先停止当前生成');
+        if (v.generating && !(gacha && owner && v.choicePending)) throw new Error('请先停止当前生成');
         const links = [...document.querySelectorAll('a[href="/agent"]')].filter(e => visible(e) && label(e) === 'New Chat');
         if (links.length !== 1) throw new Error('请展开左侧栏，显示 New Chat 按钮');
         links[0].click();

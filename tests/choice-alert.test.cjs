@@ -58,6 +58,13 @@ test('matching interactive card is detected inside a transcript role=log', () =>
   const f = fixture(); const {api} = load([f.card]);
   assert.equal(api.detected(), true); assert.equal(api.findPendingMessages()[0], f.message);
 });
+test('scoped detection excludes a pending choice in another conversation log', () => {
+  const first = fixture(), second = fixture();
+  const {api} = load([first.card]);
+  assert.equal(api.detected(first.log), true);
+  assert.equal(api.detected(second.log), false);
+  assert.equal(load([first.card, second.card]).api.detected(second.log), true);
+});
 test('class order, spacing and optional layout tokens do not matter', () => {
   const f = fixture(); f.card.attrs.class = classes.split(' ').reverse().filter(x => !['mb-1', 'w-full', 'items-start', 'overflow-hidden'].includes(x)).join('  ');
   assert.equal(load([f.card]).api.detected(), true);

@@ -6,9 +6,9 @@ const session='https://arena.ai/agent/11111111-1111-1111-1111-111111111111';
 function load(){const c=vm.createContext({performance});vm.runInContext(source.replace('try { __req("main"); }','try { globalThis.req=__req; }'),c);return c.req('gacha-runner');}
 function setup(random=()=>0.5){
  let time=0,owner=null,captcha=false;
- const v={url:'https://arena.ai/agent',main:true,conversation:false,draft:'',generating:false,editor:true,sendReady:true,newLinks:1,attachmentNames:[],blocker:'',promptConfirmed:false};
+ const v={url:'https://arena.ai/agent',main:true,conversation:false,draft:'',generating:false,editor:true,sendReady:true,newLinks:1,attachmentNames:[],blocker:'',promptConfirmed:false,choicePending:false};
  const facts={generation:2,model:'',modelUrl:''},calls=[],chunks=[];
- const bridge={read:()=>({...v}),typeDraft(expected,next,o){assert.equal(o,owner);assert.equal(v.draft,expected.trim());chunks.push({at:time,expected,next});v.draft=next.trim();return {ok:true};},action(name,p,g,o){assert.equal(o,owner);assert.equal(g,true);calls.push({name,at:time});if(name==='send'){facts.generation++;facts.model='';facts.modelUrl=session;v.url=session;v.draft='';v.generating=true;v.conversation=true;v.promptConfirmed=true;}if(name==='new'){Object.assign(v,{url:'https://arena.ai/agent',conversation:false,generating:false,responseComplete:false,promptConfirmed:false});}return {ok:true};}};
+ const bridge={read:()=>({...v}),typeDraft(expected,next,o){assert.equal(o,owner);assert.equal(v.draft,expected.trim());chunks.push({at:time,expected,next});v.draft=next.trim();return {ok:true};},action(name,p,g,o){assert.equal(o,owner);assert.equal(g,true);calls.push({name,at:time});if(name==='send'){facts.generation++;facts.model='';facts.modelUrl=session;v.url=session;v.draft='';v.generating=true;v.conversation=true;v.promptConfirmed=true;v.choicePending=false;}if(name==='new'){Object.assign(v,{url:'https://arena.ai/agent',conversation:false,generating:false,responseComplete:false,promptConfirmed:false,choicePending:false});}return {ok:true};}};
  const runner=load().create({bridge:()=>bridge,info:()=>({...facts}),now:()=>time,random,blocked:()=>captcha,claim:o=>owner=o,release:o=>{if(o===owner)owner=null;}});
  const step=(ms=250)=>{time+=ms;runner.tick();};
  const until=phase=>{for(let n=0;n<150 && runner.state().phase!==phase;n++)step();assert.equal(runner.state().phase,phase);};
@@ -26,6 +26,20 @@ test('non-target opens next round immediately without waiting 10 seconds',()=>{
 });
 test('late target during answer completes as match without starting next round',()=>{
  const e=setup();e.runner.start('你好');e.until('answer');e.step(500);e.v.generating=false;e.v.responseComplete=true;e.step();assert.equal(e.calls.filter(x=>x.name==='new').length,0);e.facts.model='astra-late';e.step(500);assert.equal(e.runner.state().status,'matched');assert.equal(e.calls.length,1);
+});
+test('pending user choice completes the owned round despite a busy React tool state',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);
+ e.v.choicePending=true;e.v.generating=true;e.v.responseComplete=false;e.step();
+ assert.equal(e.runner.state().phase,'answer');assert.match(e.runner.state().message,/待选项.*本轮完成/);
+ e.facts.model='other-model';e.step();assert.equal(e.runner.state().phase,'prepare');
+ e.step(800);e.until('opening');assert.equal(e.calls.at(-1).name,'new');
+});
+test('a choice does not override a primary target, and busy status alone does not complete a round',()=>{
+ const e=setup();e.runner.start('你好');e.until('answer');e.step(500);
+ e.facts.model='other-model';e.v.generating=true;e.v.responseComplete=false;e.step();
+ assert.equal(e.runner.state().phase,'answer');assert.equal(e.calls.length,1);
+ e.v.choicePending=true;e.facts.model='astra-preview';e.step();
+ assert.equal(e.runner.state().status,'matched');assert.equal(e.calls.length,1);
 });
 test('webpage popup waits 5 seconds up to 5 times, then resumes if popup closes',()=>{
  const e=setup();e.runner.start('你好');e.until('typing');
@@ -91,7 +105,7 @@ test('new generation or user navigation after submission pauses instead of conti
 
 test('panel mounts idle, starts only on click and disposes previous interval/panel',()=>{
  const timers=new Map(),panels=[];let id=0,actions=0;
- const window={__arenaCompanion:{pageRunnerProtocol:'amp-keystrokes-v1',attachmentsReady:()=>true,read:()=>({draft:'',attachmentNames:[],generating:false}),typeDraft(){actions++;},action(){actions++;}}};
+ const window={__arenaCompanion:{pageRunnerProtocol:'amp-keystrokes-v1',pageRunnerChoiceCompletion:true,attachmentsReady:()=>true,read:()=>({draft:'',attachmentNames:[],generating:false}),typeDraft(){actions++;},action(){actions++;}}};
  const document={body:{appendChild:root=>panels.push(root)},createElement(){
    const controls={'[data-status]':{},'[data-start]':{},'[data-stop]':{},'textarea':{value:'你好'}};
    return {style:{},querySelector:s=>controls[s],remove(){this.removed=true;}};

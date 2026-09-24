@@ -9,7 +9,7 @@ function bundle(source) {
 __mods["page-bridge"] = { fn: function (exp) {
   exp.ensure = () => {
     const b = window.__arenaCompanion;
-    if (b?.pageRunnerProtocol === 'amp-keystrokes-v1'
+    if (b?.pageRunnerProtocol === 'amp-keystrokes-v1' && b.pageRunnerChoiceCompletion === true
       && ['read','action','typeDraft','attachmentsReady'].every(k => typeof b[k] === 'function')) return b;
     // Install locally: no fetch, eval, script element or dependence on the desktop injection order.
 ${source.trimEnd()}
