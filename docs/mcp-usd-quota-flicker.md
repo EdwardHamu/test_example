@@ -46,9 +46,18 @@ SHA-256：
 - 修复后资产：cdce1751a8b40d8f98f62a1d6ae249d13cb2d83a5a90cae6a0a570629da6462a。
 - 当前测试：16f0fdbaafa586a83c5af795abc602f6b9896cdc6bfb2e4ef66120149a17fd60。
 
-## 生效确认
+## 2026-09-23 防闪烁版本生效确认（历史记录）
 
 - 保存工作后刷新页面并重新注入，或重启目标软件。该操作本轮未代为执行。
 - window.__MODEL_PROBE__.version 应为 1.2.4+assets-9.17.15-pulse-float-catalog-usd-20260923。
 - window.__ARENA_USD_QUOTA_CARD_V1__.version 应为 usd-quota-card.2。
 - 可正常卸载的旧实例支持重新注入时替换；若控制台提示更老的补丁没有 dispose，必须刷新页面，不能仅靠重复注入清除其遗留定时器。
+
+## 下次额度更新前保留上次有效数值（2026-09-24）
+
+- `assets/arena-model-probe.inject.js` 的 USD 卡片在下一轮快照暂不可用、`/agent` 新会话切换、适配器暂缺或读取异常时，不再清空已显示的金额、比例、档位、读取时间和悬停精度；醒目标注“等待新额度记录，显示上次快照”。下一份金额有效的完整快照到达后，统一更新卡片各字段并撤销等待提示。
+- 首次尚未取得有效金额时仍显示“未提供”；无效数值不会覆盖旧值。离开 Agent 页面、卸载卡片或刷新整个页面时清除内存中的上次额度，避免跨页面/持久化复用。超过五分钟的旧快照继续提示并明确不是实时余额。
+- 只修改显示层；`usd-quota` 适配器仍拒绝旧轮次的记账数据作为本轮快照，不增加网络、存储或自动发送。卡片控制器升级为 `usd-quota-card.3` 以替换旧实例；主注入版本为 `1.2.4+assets-9.17.17-usd-retain-20260924`。旧实例无 `dispose` 时仍需刷新页面。
+- 回归测试在 `tests/usd-quota-port.test.cjs`，覆盖连续暂缺、无效数值、正常更新、跨新会话短暂切换、出错、离开 Agent 页面清除及陈旧提示。验证命令：`node --check assets/arena-model-probe.inject.js`、`node --test tests/*.test.cjs`、`git diff --check`；模拟页面测试不等于真实 WebView 验收。
+- 本次验证结果：USD 专项 53/53、全量 263/263 通过；脚本与测试语法、`git diff --check` 通过，编辑器诊断未发现错误或警告。
+- 更新后生效确认：刷新页面并重新注入或重启软件，`window.__MODEL_PROBE__.version` 应为 `1.2.4+assets-9.17.17-usd-retain-20260924`，`window.__ARENA_USD_QUOTA_CARD_V1__.version` 应为 `usd-quota-card.3`。本轮未代为刷新正在运行的页面。

@@ -215,12 +215,30 @@ test('repeat installation shares one timer and disposal is idempotent',()=>{
  first.dispose();first.dispose();first.refresh();assert.equal(e.timers.size,0);assert.equal(e.cards().length,0);assert.equal(e.window[KEY],undefined);
  const next=e.panel.mount();assert.notEqual(next,first);assert.equal(e.timers.size,1);next.dispose();
 });
-test('card clears old values and tooltips when the next snapshot is unavailable',()=>{
- const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];e.setSnapshot({status:'unavailable',quota:null});widget.refresh();
- for(const id of ['remaining','used']){assert.equal(field(card,id).textContent,'未提供');assert.equal(field(card,id).title,'');}
- assert.equal(field(card,'total').textContent,'总额度 未提供');assert.equal(field(card,'total').title,'');
- assert.equal(field(card,'percent').textContent,'—');assert.equal(field(card,'checked').textContent,'未读取');
- assert.equal(field(card,'bar').getAttribute('stroke-dashoffset'),'232.478');widget.dispose();
+test('card retains last valid amounts and tooltips until another complete USD snapshot arrives',()=>{
+ const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];
+ const checked=field(card,'checked').textContent,offset=field(card,'bar').getAttribute('stroke-dashoffset');
+ e.setSnapshot({status:'unavailable',quota:null,warning:'最近采集失败，此金额可能滞后'});widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'$75.12');assert.equal(field(card,'remaining').title,'$75.123456');
+ assert.equal(field(card,'used').textContent,'$24.88');assert.equal(field(card,'total').textContent,'总额度 $100.00');
+ assert.equal(field(card,'percent').textContent,'75.1%');assert.equal(field(card,'tier').textContent,'standard · server');
+ assert.equal(field(card,'checked').textContent,checked);assert.equal(field(card,'bar').getAttribute('stroke-dashoffset'),offset);
+ assert.equal(card.dataset.state,'good');assert.match(field(card,'warning').textContent,/等待新额度记录/);
+ assert.match(field(card,'warning').textContent,/采集失败/);assert.match(field(card,'note').textContent,/保留上次/);
+ e.setSnapshot({status:'ready',quota:{allowanceUsd:100,balanceRemainingUsd:Infinity},turn:2,checkedAt:STAMP});widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'$75.12');
+ e.flushDOM();const writes=e.writes();for(let i=0;i<5;i++){e.tick();e.flushDOM();}assert.equal(e.writes(),writes);
+ e.setNow(CLOCK+60000);e.setSnapshot(snapshot({...VALUES,balanceRemainingUsd:40,chargedUserTotalUsd:60},{turn:2,checkedAt:new Date(CLOCK+60000).toISOString()}));widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'$40.00');assert.equal(field(card,'used').textContent,'$60.00');
+ assert.notEqual(field(card,'checked').textContent,checked);assert.equal(field(card,'warning').textContent,'');
+ assert.match(field(card,'note').textContent,/本会话第 2 轮/);widget.dispose();
+});
+test('without a prior valid snapshot the card remains empty until the first numeric update',()=>{
+ const e=panelHarness();e.setSnapshot({status:'unavailable',quota:null});const widget=e.panel.mount(),card=e.cards()[0];
+ assert.equal(field(card,'remaining').textContent,'未提供');assert.equal(field(card,'checked').textContent,'未读取');
+ e.setSnapshot({status:'ready',quota:{...VALUES,allowanceUsd:NaN}});widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'未提供');
+ e.setSnapshot(snapshot());widget.refresh();assert.equal(field(card,'remaining').textContent,'$75.12');widget.dispose();
 });
 test('zero allowance stays zero, negative balance stays signed and the ring is clamped',()=>{
  const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];
@@ -242,16 +260,28 @@ test('stale records and failed collection carry explicit warnings',()=>{
  e.setSnapshot(snapshot({...VALUES},{warning:'最近采集失败，此金额可能滞后'}));widget.refresh();
  assert.match(field(card,'warning').textContent,/超过 5 分钟/);assert.match(field(card,'warning').textContent,/采集失败/);widget.dispose();
 });
+test('a retained snapshot gains the stale warning once at the five-minute boundary',()=>{
+ const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];e.setSnapshot({status:'unavailable',quota:null});widget.refresh();e.flushDOM();
+ const before=e.writes();e.setNow(CLOCK+300001);e.tick();e.flushDOM();
+ assert.equal(e.writes(),before+1);assert.match(field(card,'warning').textContent,/超过 5 分钟/);
+ const after=e.writes();e.tick();e.flushDOM();assert.equal(e.writes(),after);widget.dispose();
+});
 test('server labels are text, never HTML',()=>{
  const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0],attack='<img src=x onerror=alert(1)>';
  e.setSnapshot(snapshot({...VALUES,allowanceTier:attack,allowanceSource:null}));widget.refresh();
  assert.equal(field(card,'tier').textContent,attack);assert.ok(!card.innerHTML.includes(attack));widget.dispose();
 });
-test('non-Agent pages, missing API and adapter errors show empty explanatory states',()=>{
+test('new-chat route and transient adapter failures retain old values; leaving Agent clears them',()=>{
  const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];e.context.location.pathname='/agent';widget.refresh();
- assert.equal(field(card,'remaining').textContent,'未提供');assert.match(field(card,'note').textContent,/打开 Agent 会话/);
- e.context.location.pathname='/agent/'+SESSION;delete e.window.__MODEL_PROBE__.usdQuotaSnapshot;widget.refresh();assert.match(field(card,'note').textContent,/适配器尚未加载/);
- e.window.__MODEL_PROBE__.usdQuotaSnapshot=()=>{throw Error('failure');};assert.doesNotThrow(()=>widget.refresh());assert.match(field(card,'note').textContent,/暂不可用/);widget.dispose();
+ assert.equal(field(card,'remaining').textContent,'$75.12');assert.match(field(card,'note').textContent,/保留上次/);
+ e.context.location.pathname='/agent/'+SESSION;delete e.window.__MODEL_PROBE__.usdQuotaSnapshot;widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'$75.12');assert.match(field(card,'note').textContent,/适配器尚未加载/);
+ e.window.__MODEL_PROBE__.usdQuotaSnapshot=()=>{throw Error('failure');};assert.doesNotThrow(()=>widget.refresh());
+ assert.equal(field(card,'remaining').textContent,'$75.12');assert.match(field(card,'note').textContent,/暂不可用/);
+ e.context.location.pathname='/settings';widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'未提供');assert.equal(field(card,'warning').textContent,'');assert.match(field(card,'note').textContent,/打开 Agent 会话/);
+ e.context.location.pathname='/agent/'+SESSION;e.window.__MODEL_PROBE__.usdQuotaSnapshot=()=>({status:'unavailable',quota:null});widget.refresh();
+ assert.equal(field(card,'remaining').textContent,'未提供');widget.dispose();
 });
 test('off-origin and framed pages create no card or timer',()=>{
  for(const options of [{origin:'https://example.test'},{iframe:true}]){const e=panelHarness(options);assert.equal(e.panel.mount(),null);assert.equal(e.timers.size,0);assert.equal(e.created.length,0);assert.equal(e.network(),0);}
@@ -310,8 +340,8 @@ test('observers are disconnected on disposal and queued callbacks cannot resurre
 });
 test('reinjection replaces the previous disposable implementation rather than keeping its flicker',()=>{
  const e=panelHarness();let refreshed=0,disposed=0;
- const old={refresh(){refreshed++;},dispose(){disposed++;delete e.window[KEY];}};e.window[KEY]=old;
- const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.ok(widget.version);
+ const old={version:'usd-quota-card.2',refresh(){refreshed++;},dispose(){disposed++;delete e.window[KEY];}};e.window[KEY]=old;
+ const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.equal(widget.version,'usd-quota-card.3');
  assert.equal(e.window[KEY],widget);assert.equal(e.cards().length,1);assert.equal(e.timers.size,1);widget.dispose();
 });
 test('stale warning updates only once when the five-minute boundary is crossed',()=>{

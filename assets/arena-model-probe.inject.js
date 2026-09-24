@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.4+assets-9.17.16-gacha-choice-20260924 — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.4+assets-9.17.17-usd-retain-20260924 — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -6440,7 +6440,7 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
     if(typeof window==='undefined'||typeof document==='undefined'||typeof location==='undefined'
       ||location.origin!=='https://arena.ai'||window.top!==window)return null;
     const KEY='__ARENA_USD_QUOTA_CARD_V1__';
-    const CARD_VERSION='usd-quota-card.2';
+    const CARD_VERSION='usd-quota-card.3';
     const previous=window[KEY];
     if(previous?.version===CARD_VERSION&&typeof previous.refresh==='function'){previous.refresh();return previous;}
     if(previous){
@@ -6450,7 +6450,7 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
         return previous;
       }
     }
-    let card=null,owner=null,disposed=false,watchedRoots=[];
+    let card=null,owner=null,disposed=false,watchedRoots=[],lastReady=null;
     // Host innerHTML updates remove the card. Restore it at the mutation checkpoint,
     // before paint, rather than leaving a blank until the one-second data timer.
     const observer=typeof MutationObserver==='function'?new MutationObserver(()=>{
@@ -6493,19 +6493,34 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
     };
     const setState=value=>{if(card.dataset.state!==value)card.dataset.state=value;};
     function empty(note){
+      lastReady=null;
       setState('empty');text('percent','—');text('remaining','未提供');text('total','总额度 未提供');
       for(const id of ['used','tier','window'])text(id,'未提供');text('checked','未读取');text('warning','');text('note',note);
       attr('bar','stroke-dashoffset','232.478');for(const id of ['remaining','used','total'])attr(id,'title',null);
+    }
+    function retain(note,warning=''){
+      if(!lastReady){empty(note);return;}
+      const age=Date.now()-Date.parse(lastReady.checkedAt);
+      text('warning',[lastReady.overLimit?'记录标记：账户额度已超限':'',warning,
+        '等待新额度记录，显示上次快照',age>300000?'快照已超过 5 分钟，不代表当前实时余额':''].filter(Boolean).join('；'));
+      text('note',note+' 当前保留上次获得的额度数值（读取时间 '+stamp(lastReady.checkedAt)+'）；下一次完整记账快照到达后自动更新。');
     }
     function refresh(){
       if(disposed)return;
       try{
         if(!mount())return;
-        if(!/^\/agent\/[0-9a-f-]{36}\/?$/i.test(location.pathname)){empty('打开 Agent 会话后，显示该会话最近一次已采集的记账快照。');return;}
+        if(!/^\/agent\/[0-9a-f-]{36}\/?$/i.test(location.pathname)){
+          if(/^\/agent\/?$/i.test(location.pathname))retain('正在进入 Agent 会话，等待新的服务端记账记录。');
+          else empty('打开 Agent 会话后，显示该会话最近一次已采集的记账快照。');
+          return;
+        }
         const api=window.__MODEL_PROBE__;
-        if(typeof api?.usdQuotaSnapshot!=='function'){empty('美元额度适配器尚未加载，请完全退出软件后重新启动。');return;}
+        if(typeof api?.usdQuotaSnapshot!=='function'){retain('美元额度适配器尚未加载，请完全退出软件后重新启动。');return;}
         const s=api.usdQuotaSnapshot(),q=s?.quota;
-        if(s?.status!=='ready'||!q){empty('尚无本轮完整美元额度记录。正常使用并完成一轮回答后，随原探针采集更新；不会额外发送消息。');return;}
+        if(s?.status!=='ready'||!q||!Number.isFinite(q.allowanceUsd)||q.allowanceUsd<0||!Number.isFinite(q.balanceRemainingUsd)){
+          retain('尚无本轮完整美元额度记录。正常使用并完成一轮回答后，随原探针采集更新；不会额外发送消息。',s?.warning);
+          return;
+        }
         const ratio=q.allowanceUsd>0?q.balanceRemainingUsd/q.allowanceUsd*100:null;
         const pct=Number.isFinite(ratio)?ratio:null;
         setState(q.overLimit||q.balanceRemainingUsd<0?'low':pct===null?'empty':pct>=50?'good':pct>=20?'warn':'low');
@@ -6519,12 +6534,13 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
         const age=Date.now()-Date.parse(s.checkedAt);
         text('warning',[q.overLimit===true?'记录标记：账户额度已超限':'',s.warning||'',age>300000?'快照已超过 5 分钟，不代表当前实时余额':''].filter(Boolean).join('；'));
         text('note','来源：本会话第 '+s.turn+' 轮 spend.recorded（服务端记账）。不是现金余额，不从 credits 换算，也不累计多个快照。金额保留两位小数，悬停可看更高精度。');
-      }catch(_){if(card)empty('额度数据暂不可用；原有聊天和模型监测功能不受此卡片控制。');}
+        lastReady={checkedAt:s.checkedAt,overLimit:q.overLimit===true};
+      }catch(_){if(card)retain('额度数据暂不可用；原有聊天和模型监测功能不受此卡片控制。');}
     }
     const timer=setInterval(refresh,1000);
     const controller={version:CARD_VERSION,refresh,dispose(){
       if(disposed)return;
-      disposed=true;clearInterval(timer);observer?.disconnect();watchedRoots=[];card?.remove();card=null;owner=null;
+      disposed=true;clearInterval(timer);observer?.disconnect();watchedRoots=[];card?.remove();card=null;owner=null;lastReady=null;
       if(window[KEY]===controller)delete window[KEY];
     }};
     window[KEY]=controller;refresh();return controller;
@@ -6581,7 +6597,7 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.16-gacha-choice-20260924';
+const VERSION = '1.2.4+assets-9.17.17-usd-retain-20260924';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
