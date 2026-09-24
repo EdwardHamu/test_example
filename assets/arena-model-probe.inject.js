@@ -1,4 +1,4 @@
-/* arena-model-probe v1.2.4+assets-9.17.17-usd-retain-20260924 — 单文件注入版 (CDP / DevTools Snippet) */
+/* arena-model-probe v1.2.4+assets-9.17.17-usd-retain-balance-block-route-watch-scoped-20260924 — 单文件注入版 (CDP / DevTools Snippet) */
 (function () {
 "use strict";
 var __mods = {}, __cache = {};
@@ -2629,7 +2629,53 @@ function cosineSim(a, b, dims = FP_DIMS) {
   exp.fingerprintVector = fingerprintVector;
   exp.cosineSim = cosineSim;
 } };
+__mods["route-watch"] = { fn: function (exp) {
+// Only explicit same-run, latest-turn resample events count as route signals.
+// Ignore feature flags, tool-call prefixes and older turns: none proves a switch.
+const validName = x => typeof x === 'string' && x.length > 0 && x.length <= 120
+  && !/[\u0000-\u001f\u007f]/.test(x) && !/Bearer |^eyJ[^ ]+\.[^ ]+\./.test(x);
+const sameModel = (a,b) => a.toLowerCase().replace(/-vertex$/,'') === b.toLowerCase().replace(/-vertex$/,'');
+function runIdFromEventsUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.origin !== 'https://api.trigger.dev') return null;
+    return /^\/api\/v1\/runs\/(run_[A-Za-z0-9_-]{1,128})\/events$/.exec(u.pathname)?.[1] || null;
+  } catch { return null; }
+}
+function summarize(trace, runId) {
+  if (!/^run_[A-Za-z0-9_-]{1,128}$/.test(runId || '') || !Array.isArray(trace?.events)
+    || trace.events.length > 5000) return null;
+  let turn = 0, attempt = false, switched = false, committed = false, before = null, after = null;
+  for (const e of trace.events) {
+    if (!e || e.runId !== runId || typeof e.message !== 'string') continue;
+    const t = /^chat turn (\d{1,4})$/.exec(e.message);
+    if (t) {
+      const next = Number(t[1]);
+      if (next < turn || next < 1) continue;
+      turn = next;attempt = false;switched = false;committed = false;before = null;after = null;
+      continue;
+    }
+    if (!turn) continue;
+    if (e.message === 'model.resample.attempt_failed') attempt = true;
+    else if (e.message === 'model.resample.switched') switched = true;
+    else if (e.message === 'model.resample.committed' && switched) committed = true;
+    else if (/^ai\.(?:streamText\.doStream|generateText\.doGenerate)$/.test(e.message)) {
+      const items = e.style?.accessory?.items;
+      if (!Array.isArray(items)) continue;
+      const model = items.slice(0, 12).find(x => /cube/.test(x?.icon || '') && validName(x?.text))?.text.trim();
+      if (model) { if (switched) after = model; else before = model; }
+    }
+  }
+  if (!turn || !(attempt || switched)) return null;
+  const to = switched && before && after && !sameModel(before,after) ? after : null;
+  return {turn, phase:committed?'committed':switched?'switched':'attempt-failed', from:before, to};
+}
+exp.runIdFromEventsUrl = runIdFromEventsUrl;
+exp.summarize = summarize;
+} };
 __mods["interceptor"] = { fn: function (exp) {
+  var runIdFromEventsUrl = __req("route-watch").runIdFromEventsUrl;
+  var summarizeRoute = __req("route-watch").summarize;
   var collectModelFields = __req("classify").collectModelFields;
   var scanTextForModel = __req("classify").scanTextForModel;
   var evidenceFromHeaders = __req("classify").evidenceFromHeaders;
@@ -2650,6 +2696,7 @@ const BUS = {
   generation: 0,
   diagnostics: { heartbeats: 0, requests: 0, responses: 0, headers: 0, blocked: 0 },
   pulseInfo: { pulse: 100, refreshedAt: null },
+  activeRunId: null, // A validated page-scoped public token, never the token itself.
   evidence: [],      // 结构化证据
   observations: [],  // 每次完整对话的观测（用于指纹建档）
   listeners: [],
@@ -3089,12 +3136,28 @@ function installFetchHook() {
 
     const slot = inferSlot();
     const tStart = now();
+    const requestGeneration = BUS.generation, requestRunId = BUS.activeRunId;
     const p = origFetch.apply(this, arguments);
     if (!url) return p;
 
     return p.then((res) => {
       try {
         const fullUrl = res.url || url || '';
+        // The Arena page already polls Trigger.dev. Read its response clone to
+        // spot resample events without sending any additional request.
+        const routeRunId = runIdFromEventsUrl(fullUrl);
+        if (routeRunId && routeRunId === requestRunId && requestGeneration === BUS.generation
+          && routeRunId === BUS.activeRunId && res.ok) {
+          const size = Number(res.headers?.get('content-length') || 0);
+          if (!size || size <= 4 * 1024 * 1024) {
+            res.clone().text().then(text => {
+              if (text.length > 4 * 1024 * 1024 || requestGeneration !== BUS.generation
+                || routeRunId !== BUS.activeRunId) return;
+              const snapshot = summarizeRoute(JSON.parse(text),routeRunId);
+              if (snapshot) BUS.emit({kind:'route-trace',data:{runId:routeRunId,snapshot}});
+            }).catch(() => {});
+          }
+        }
         if (fullUrl.includes('/api/me/pulse')) {
           res.clone().json().then(data => {
             if (data && typeof data.pulse === 'number') {
@@ -3503,6 +3566,7 @@ __mods["runmodel"] = { fn: function (exp) {
   var automaticDetail = __req("automatic-trace").automaticDetail;
   var parseTrace = __req("trace-parser").parseTrace;
   var BUS = __req("interceptor").BUS;
+  var summarizeRoute = __req("route-watch").summarize;
 
 /**
  * runmodel.js — 从 Trigger.dev run trace 提取【真实模型名】
@@ -3532,7 +3596,7 @@ let rateLimitUntil=0;
 const STATE = {
   finalReadStarted:false, lastSeenTurn:0, minTurn:0, tokenUrl:null, collectionStatus:"pending", checkedAt:null,
   automaticTrace:null,
-  detailRead:false,
+  detailRead:false, routeSwitch:null,
   token: null,
   runId: null,
   tokenAt: 0,
@@ -3615,6 +3679,7 @@ function acceptToken(name, value) {
   STATE.tokenUrl=location.origin+location.pathname;
   STATE.token = value;
   STATE.runId = rid || STATE.runId;
+  BUS.activeRunId = STATE.runId;
   STATE.tokenAt = Date.now();
   STATE.tokenExp = exp * 1000;
   STATE.lastError = Date.now()<rateLimitUntil?"http-429":null;
@@ -3648,6 +3713,26 @@ function newestTraceTurn(trace,runId) {
     if(turn&&active===turn)events.push(e);
   }
   return {turn,events};
+}
+function observeRouteSnapshot(runId, snapshot) {
+  if (!snapshot || runId !== STATE.runId || !STATE.token || BUS.activeRunId !== runId
+    || STATE.tokenUrl !== location.origin+location.pathname
+    || (STATE.tokenExp && Date.now() >= STATE.tokenExp)
+    || !Number.isSafeInteger(snapshot.turn) || snapshot.turn <= STATE.minTurn
+    || snapshot.turn < STATE.lastSeenTurn
+    || !['attempt-failed','switched','committed'].includes(snapshot.phase)) return false;
+  const previous = STATE.routeSwitch;
+  const rank = { 'attempt-failed':0, switched:1, committed:2 };
+  if (previous && (snapshot.turn < previous.turn || snapshot.turn === previous.turn
+    && (rank[snapshot.phase] < rank[previous.phase]
+      || rank[snapshot.phase] === rank[previous.phase] && previous.to && !snapshot.to
+      || previous.phase === snapshot.phase && previous.from === snapshot.from && previous.to === snapshot.to))) return false;
+  // No raw events, credentials, trace bodies or failure logs enter state or UI.
+  const event = {runId, turn:snapshot.turn, phase:snapshot.phase,
+    from:snapshot.from || null, to:snapshot.to || null, generation:BUS.generation};
+  STATE.routeSwitch=event;
+  BUS.emit({kind:'route-switch',data:{...event}});
+  return true;
 }
 function state() {
   const { token, ...safe } = STATE;
@@ -3716,6 +3801,9 @@ async function fetchRunModels(opts = {}) {
     if (STATE.runId !== runId || STATE.token !== token || generation !== BUS.generation) return { ok: false, reason: 'superseded' };
     const trace=JSON.parse(text),latest=newestTraceTurn(trace,runId);
     if(latest.turn<=STATE.minTurn){STATE.collectionStatus='pending';return {ok:false,reason:'awaiting-current-turn'};}
+    // Report a switch as soon as the events body is available, before the
+    // sequential span-detail reads (which may take seconds).
+    observeRouteSnapshot(runId,summarizeRoute(trace,runId));
     STATE.lastSeenTurn=Math.max(STATE.lastSeenTurn,latest.turn);
     const currentTrace={...trace,events:latest.events};
     const { models, tokens, reasoning, order, usage } = extractModelLabels(JSON.stringify(currentTrace));
@@ -3813,6 +3901,10 @@ function startAutoResolve(opts = {}) {
   autoStarted = true;
 
   BUS.on(async (evt) => {
+    if (evt.kind === 'route-trace') {
+      observeRouteSnapshot(evt.data?.runId,evt.data?.snapshot);
+      return;
+    }
     if(evt.kind==='observation'&&evt.data?.complete&&!STATE.finalReadStarted&&STATE.token){
       STATE.finalReadStarted=true;
       const runId=STATE.runId,generation=BUS.generation;
@@ -3820,7 +3912,7 @@ function startAutoResolve(opts = {}) {
         await new Promise(r=>setTimeout(r,i?6000:2000));
         if(runId!==STATE.runId||generation!==BUS.generation||Date.now()<rateLimitUntil)return;
         const result=await fetchRunModels({final:true});
-        if(result.ok&&result.name){pushModelEvidence(result.name,runId);BUS.emit({kind:'run-model',data:{name:result.name,runId}});}
+        if(result.ok&&result.name){pushModelEvidence(result.name,runId);BUS.emit({kind:'run-model',data:{name:result.name,runId,generation}});}
         if(['http-401','http-403','http-404','http-429','token-expired','superseded'].includes(result.reason))return;
       }
       return;
@@ -3841,7 +3933,7 @@ function startAutoResolve(opts = {}) {
     if (STATE.runId !== runId || BUS.generation !== generation) return;
     if (r && r.ok && r.name) {
       pushModelEvidence(r.name, runId);
-      BUS.emit({ kind: 'run-model', data: { name: r.name, runId, all: r.models } });
+      BUS.emit({ kind: 'run-model', data: { name: r.name, runId, generation, all: r.models } });
       // The name often arrives before usage. Continue bounded authorized reads.
       let lastName=r.name;
       for(let i=0;i<7;i++) {
@@ -3851,7 +3943,7 @@ function startAutoResolve(opts = {}) {
         const next=await fetchRunModels();
         if(STATE.runId!==runId||BUS.generation!==generation)return;
         if(['finished','token-expired','no-token','superseded','http-401','http-403','http-404','http-429'].includes(next.reason))return;
-        if(next.ok&&next.name){lastName=next.name;pushModelEvidence(next.name,runId);BUS.emit({kind:'run-model',data:{name:next.name,runId,all:next.models}});}
+        if(next.ok&&next.name){lastName=next.name;pushModelEvidence(next.name,runId);BUS.emit({kind:'run-model',data:{name:next.name,runId,generation,all:next.models}});}
       }
     } else {
       BUS.emit({ kind: 'run-model-failed', data: { runId, reason: (r && r.reason) || 'unknown' } });
@@ -3862,6 +3954,7 @@ function reset() {
   if(activeController)activeController.abort();activeController=null;
   STATE.finalReadStarted=false;STATE.lastSeenTurn=0;STATE.minTurn=0;STATE.tokenUrl=null;STATE.collectionStatus=Date.now()<rateLimitUntil?"rate-limited":"pending";STATE.checkedAt=null;
   STATE.automaticTrace=null;STATE.detailRead=false;
+  STATE.routeSwitch=null;BUS.activeRunId=null;
   STATE.token = null;
   STATE.tokenExp = 0;
   STATE.fetching = false;
@@ -3878,6 +3971,7 @@ function reset() {
   exp.acceptToken = acceptToken;
   exp.beginRunTurn = beginRunTurn;
   exp.newestTraceTurn = newestTraceTurn;
+  exp.observeRouteSnapshot = observeRouteSnapshot;
   exp.state = state;
   exp.extractModelLabels = extractModelLabels;
   exp.fetchRunModels = fetchRunModels;
@@ -4872,10 +4966,28 @@ __mods["notifier"] = { fn: function (exp) {
     }
   } catch { /* noop */ }
 
-  // 上一轮（跨 turn 保留）的真实模型名基准，以及已处置过的 generation，避免重复点击。
-  let previousModelName = null;
-  let driftHandledGeneration = -1;
-  let lastDriftEvent = null;
+  // Conversation-keyed in-memory history: never compare names from different chats.
+  // Bound memory; an evicted conversation simply anchors afresh when revisited.
+  const modelByConversation = new Map();
+  const conversationId = () => {
+    if (typeof location === 'undefined' || location.origin !== 'https://arena.ai') return null;
+    return /^\/agent\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+      .exec(location.pathname || '')?.[1].toLowerCase() || null;
+  };
+  const verifiedConversation = meta => {
+    const active = conversationId();
+    return active && typeof meta?.conversationId === 'string'
+      && meta.conversationId.toLowerCase() === active ? active : null;
+  };
+  function modelState(id) {
+    let state = modelByConversation.get(id);
+    if (!state) {
+      if (modelByConversation.size >= 24) modelByConversation.delete(modelByConversation.keys().next().value);
+      state = {name:null,handledGeneration:-1,lastDrift:null};
+      modelByConversation.set(id,state);
+    }
+    return state;
+  }
 
   function isModelDriftStopEnabled() { return driftStopEnabled; }
   function setModelDriftStopEnabled(val) {
@@ -4888,13 +5000,15 @@ __mods["notifier"] = { fn: function (exp) {
     return driftStopEnabled;
   }
 
-  function modelBaseline() { return previousModelName; }
-  function lastModelDrift() { return lastDriftEvent; }
+  function modelBaseline() { const id=conversationId();return id ? modelByConversation.get(id)?.name || null : null; }
+  function lastModelDrift() { const id=conversationId();return id ? modelByConversation.get(id)?.lastDrift || null : null; }
   function resetModelBaseline(name = null) {
-    previousModelName = typeof name === 'string' && name.trim() ? name.trim() : null;
-    driftHandledGeneration = -1;
-    lastDriftEvent = null;
-    return previousModelName;
+    const id=conversationId();
+    if (!id) return null;
+    const state=modelState(id);
+    state.name=typeof name === 'string' && name.trim() ? name.trim() : null;
+    state.handledGeneration=-1;state.lastDrift=null;
+    return state.name;
   }
 
   // 归一化：忽略大小写、两端空白与 -vertex 路由后缀，避免同一模型被误判为漂移。
@@ -4997,43 +5111,60 @@ __mods["notifier"] = { fn: function (exp) {
     const current = typeof currentName === 'string' ? currentName.trim() : '';
     if (!current) return null;
 
+    // Fail closed if the caller has no verified conversation identity or the
+    // page navigated since the trace was produced.
+    const id=verifiedConversation(meta);
+    if (!id) return null;
+    const state=modelState(id);
     const generation = typeof meta.generation === 'number' ? meta.generation : BUS.generation;
-    const previous = previousModelName;
+    const previous = state.name;
 
     // 首轮没有基准可比，只记录，不做任何动作。
     if (!previous) {
-      previousModelName = current;
+      state.name = current;
       return null;
     }
 
     if (normalizeModelName(previous) === normalizeModelName(current)) {
-      previousModelName = current;
+      state.name = current;
       return null;
     }
 
     // 同一 generation 内只处置一次，避免 recompute 多次触发重复点击。
-    if (driftHandledGeneration === generation) {
-      previousModelName = current;
+    if (state.handledGeneration === generation) {
+      state.name = current;
       return null;
     }
-    driftHandledGeneration = generation;
+    state.handledGeneration = generation;
 
-    const event = { previous, current, generation, at: Date.now(), stopped: false, enabled: driftStopEnabled };
+    const event = { previous, current, conversationId:id, generation, at: Date.now(), stopped: false, enabled: driftStopEnabled };
     // 基准立即前移到本轮，下一轮以本轮为准继续比对。
-    previousModelName = current;
+    state.name = current;
 
     if (!driftStopEnabled) {
-      lastDriftEvent = event;
+      state.lastDrift = event;
       return event;
     }
 
-    event.stopped = clickStopButton();
-    lastDriftEvent = event;
+    event.stopped = conversationId() === id && clickStopButton();
+    state.lastDrift = event;
     try { notifyDrift(current, previous, event.stopped); } catch { /* noop */ }
     try {
       BUS.emit({ kind: 'model-drift-stop', data: { ...event } });
     } catch { /* noop */ }
     return event;
+  }
+
+  function checkRouteSwitch(fromName, toName, meta = {}) {
+    const from = typeof fromName === 'string' ? fromName.trim() : '';
+    const to = typeof toName === 'string' ? toName.trim() : '';
+    if (!from || !to || normalizeModelName(from) === normalizeModelName(to)) return null;
+    const id=verifiedConversation(meta);
+    if (!id) return null;
+    // The same-turn trace provides its own pre-switch baseline; no prior turn
+    // or feature flag is used to infer which model was replaced.
+    modelState(id).name = from;
+    return checkModelDrift(to, meta);
   }
 
   function triggerEscapeKey() {
@@ -5454,6 +5585,7 @@ __mods["notifier"] = { fn: function (exp) {
   exp.isModelDriftStopEnabled = isModelDriftStopEnabled;
   exp.setModelDriftStopEnabled = setModelDriftStopEnabled;
   exp.checkModelDrift = checkModelDrift;
+  exp.checkRouteSwitch = checkRouteSwitch;
   exp.modelBaseline = modelBaseline;
   exp.resetModelBaseline = resetModelBaseline;
   exp.lastModelDrift = lastModelDrift;
@@ -6605,10 +6737,18 @@ __mods["main"] = { fn: function (exp) {
  * 目标：装钩子 → 收证据 → 首帧快判 → 每次完整响应精判 → 自动建档。
  * 预算：从页面发消息到 HUD 出首判，目标 < 800ms（首帧即判）。
  */
-const VERSION = '1.2.4+assets-9.17.17-usd-retain-balance-block-20260924';
+const VERSION = '1.2.4+assets-9.17.17-usd-retain-balance-block-route-watch-scoped-20260924';
 function boot(opts = {}) {
   const cooldown = createCooldown();
   const cooldownKey = () => `${location.origin}${location.pathname}:${BUS.generation}`;
+  const conversationForRun = (runId,generation) => {
+    const rs=runState(), url=location.origin+location.pathname;
+    if (!rs.tokenPresent || rs.runId !== runId || rs.tokenUrl !== url
+      || rs.tokenExp && Date.now() >= rs.tokenExp || BUS.activeRunId !== runId
+      || generation !== BUS.generation) return null;
+    return /^https:\/\/arena\.ai\/agent\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+      .exec(url)?.[1].toLowerCase() || null;
+  };
   const cfg = {
     showHUD: true,
     showPulseWidget: true,
@@ -6777,6 +6917,30 @@ function boot(opts = {}) {
 
     // Native desktop summary does not require a page HUD.
 
+    if (evt.kind === 'route-switch') {
+      const d = evt.data || {};
+      const conversationId=conversationForRun(d.runId,d.generation);
+      if (!conversationId) return;
+      if (d.phase === 'attempt-failed') {
+        state.hud?.log('⚠ 本轮模型调用失败；等待路由切换证据，不判定已换模');
+        return;
+      }
+      if (!d.from || !d.to) {
+        state.hud?.log('⚠ 检测到本轮模型路由切换；目标模型尚未从 trace 标签确认');
+        return;
+      }
+      try {
+        const drift = notifier.checkRouteSwitch(d.from,d.to,{generation:d.generation,conversationId});
+        if (drift) state.hud?.log(drift.stopped
+          ? `⛔ 本轮模型已切换：${d.from} → ${d.to}，已自动点击停止`
+          : `⚠ 本轮模型已切换：${d.from} → ${d.to}${drift.enabled ? '（未找到停止按钮）' : '（自动停止已关闭）'}`);
+        else if (d.phase === 'committed') state.hud?.log(`本轮模型切换已确认：${d.from} → ${d.to}`);
+      } catch { /* Failure to notify must not break the page. */ }
+      pushModelEvidence(d.to,d.runId,'当前轮 Trigger.dev model.resample.switched + streamText 模型标签');
+      recompute('route-switch');
+      return;
+    }
+
     if (evt.kind === 'run-token') {
       const d = evt.data || {};
       recompute('run-token');
@@ -6784,12 +6948,14 @@ function boot(opts = {}) {
     }
 
     if (evt.kind === 'run-model') {
+      const conversationId=conversationForRun(evt.data?.runId,evt.data?.generation);
+      if (!conversationId) return;
       const name = evt.data && evt.data.name;
       state.hud?.log(`★ 真实模型名: ${name}`);
       // 模型名与上一轮不一致时立刻停止本轮生成（停止/发送为同一按钮，
       // 只在按钮处于「Stop generating」状态时点击，不会误触发送）。
       try {
-        const drift = notifier.checkModelDrift(name, { generation: BUS.generation });
+        const drift = notifier.checkModelDrift(name, { generation: BUS.generation, conversationId });
         if (drift) {
           state.hud?.log(drift.stopped
             ? `⛔ 模型名变更：${drift.previous} → ${drift.current}，已自动点击停止`
@@ -7074,7 +7240,8 @@ function boot(opts = {}) {
     /** 最近一次检测到的模型名变更事件 */
     lastModelDrift: () => notifier.lastModelDrift(),
     /** 手动执行一次模型名比对（调试用） */
-    checkModelDrift: (name) => notifier.checkModelDrift(name, { generation: BUS.generation }),
+    checkModelDrift: (name) => notifier.checkModelDrift(name, { generation: BUS.generation,
+      conversationId: conversationForRun(runState().runId,BUS.generation) }),
     /** 手动点击一次停止按钮（调试用） */
     clickStop: () => notifier.clickStopButton(),
 

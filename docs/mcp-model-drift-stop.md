@@ -1,5 +1,7 @@
 # 模型名变更自动停止 与 页面刷新风险审计
 
+> 2026-09-24 更新：原来的全局上一轮基准已改为按 Agent 对话 ID 隔离的内存历史；以下实现说明以更新后的代码为准。
+
 ## 需求
 
 探针检测到当前会话解析出的真实模型名与之前的历史模型名不一致时，立刻点击停止会话。
@@ -18,11 +20,12 @@ STATE.modelHistory.length = 0;
 而 `beginRunTurn()` 在每个 `turn-start` 事件都会调用 `reset()`。
 这意味着 `modelHistory` 只在**单轮之内**有效，跨轮读取永远拿不到上一轮的模型名。
 
-因此在 `notifier` 模块内新增独立基准 `previousModelName`：
+因此 `notifier` 模块用 `modelByConversation` 保存独立基准：
 
-- 仅保存在内存中，跨轮保留，不写 `localStorage`；
-- 刷新页面即自然重置，不会把上次浏览会话的模型名带到新会话；
-- 可通过 `resetModelBaseline(name)` 手动锚定或清空。
+- 每个 `https://arena.ai/agent/<UUID>` 对话独立保存名称与已处理的 generation，不写 `localStorage`；
+- 最多保留 24 个对话的内存历史；被淘汰的旧对话再次打开时只重新锚定，不跨对话回退；
+- 无有效对话 ID、当前页面与事件的对话 ID 不一致时不比对、不自动停止；
+- 刷新页面即自然重置；`resetModelBaseline(name)` 只修改当前对话的基准。
 
 ### 1.2 判定规则
 
@@ -37,6 +40,7 @@ STATE.modelHistory.length = 0;
 | 归一化后名称不同 | 大小写与 `-vertex` 差异不算漂移 |
 | 本 `generation` 未处置过 | `recompute` 可能多次触发，同一轮只点一次 |
 | 开关已开启 | 关闭时仍返回事件供 HUD 记录，但不点击 |
+| 当前对话、run、generation 均匹配 | 自动事件必须属于当前 `/agent/<UUID>`、其已验证令牌绑定的 run 与当前 generation |
 
 ### 1.3 只点停止、绝不误发
 
@@ -61,7 +65,9 @@ return /^(?:stop generating|stop|停止生成|停止)$/i.test(l)  // 仅匹配�
 ```js
 if (evt.kind === 'run-model') {
   const name = evt.data && evt.data.name;
-  const drift = notifier.checkModelDrift(name, { generation: BUS.generation });
+  const conversationId = conversationForRun(evt.data?.runId, evt.data?.generation);
+  if (!conversationId) return; // 页面已切换、旧 run 或旧 generation：不停止
+  const drift = notifier.checkModelDrift(name, { generation: BUS.generation, conversationId });
   ...
 }
 ```
@@ -85,8 +91,8 @@ HUD 新增按钮「模型变更停止: 开启/关闭」（`data-act="toggle-drif
 |---|---|
 | `setModelDriftStopEnabled(bool)` | 开关自动停止 |
 | `isModelDriftStopEnabled()` | 查询开关状态 |
-| `modelBaseline()` | 当前比对基准 |
-| `resetModelBaseline(name?)` | 重设或清空基准 |
+| `modelBaseline()` | 当前对话的比对基准；无有效对话时为 null |
+| `resetModelBaseline(name?)` | 重设或清空当前对话的基准 |
 | `lastModelDrift()` | 最近一次漂移事件 |
 | `checkModelDrift(name)` | 手动比对（调试） |
 | `clickStop()` | 手动点击停止（调试） |

@@ -8,6 +8,8 @@ const path = require('path');
 
 const SRC = path.join(__dirname, '..', 'assets', 'arena-model-probe.inject.js');
 const source = fs.readFileSync(SRC, 'utf8');
+const CONVERSATION_ID = '11111111-1111-1111-1111-111111111111';
+const scope = generation => ({generation, conversationId:CONVERSATION_ID});
 
 /* ---------- 最小 DOM 替身 ---------- */
 function makeButton(label, opts = {}) {
@@ -25,6 +27,7 @@ function makeButton(label, opts = {}) {
 }
 
 function installDom(buttons) {
+  global.location = {origin:'https://arena.ai',pathname:'/agent/'+CONVERSATION_ID};
   const main = {
     getClientRects: () => [{ width: 600, height: 400 }],
     querySelectorAll: () => buttons,
@@ -78,14 +81,14 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(true);
   n.resetModelBaseline();
 
-  assert.strictEqual(n.checkModelDrift('gpt-6-astra-high', { generation: 1 }), null, '首轮应只锚定基准');
+  assert.strictEqual(n.checkModelDrift('gpt-6-astra-high', scope(1)), null, '首轮应只锚定基准');
   assert.strictEqual(stopBtn.clicks, 0, '首轮不得点击');
 
-  assert.strictEqual(n.checkModelDrift('gpt-6-astra-high', { generation: 2 }), null, '同名不应触发');
+  assert.strictEqual(n.checkModelDrift('gpt-6-astra-high', scope(2)), null, '同名不应触发');
   assert.strictEqual(stopBtn.clicks, 0, '同名不得点击');
 
   // -vertex 路由后缀与大小写差异不算漂移
-  assert.strictEqual(n.checkModelDrift('GPT-6-Astra-High-vertex', { generation: 3 }), null, '归一化后同名不应触发');
+  assert.strictEqual(n.checkModelDrift('GPT-6-Astra-High-vertex', scope(3)), null, '归一化后同名不应触发');
   assert.strictEqual(stopBtn.clicks, 0, '归一化同名不得点击');
   console.log('PASS  同名 / 大小写 / -vertex 后缀不触发停止');
 }
@@ -98,7 +101,7 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(true);
   n.resetModelBaseline('gpt-6-astra-high');
 
-  const ev = n.checkModelDrift('claude-sonnet-5', { generation: 2 });
+  const ev = n.checkModelDrift('claude-sonnet-5', scope(2));
   assert.ok(ev, '异名应返回事件');
   assert.strictEqual(ev.previous, 'gpt-6-astra-high');
   assert.strictEqual(ev.current, 'claude-sonnet-5');
@@ -116,8 +119,8 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(true);
   n.resetModelBaseline('model-a');
 
-  n.checkModelDrift('model-b', { generation: 7 });
-  n.checkModelDrift('model-c', { generation: 7 });
+  n.checkModelDrift('model-b', scope(7));
+  n.checkModelDrift('model-c', scope(7));
   assert.strictEqual(stopBtn.clicks, 1, '同一 generation 只应点击一次');
   console.log('PASS  同一轮内不重复点击');
 }
@@ -130,7 +133,7 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(true);
   n.resetModelBaseline('model-a');
 
-  const ev = n.checkModelDrift('model-b', { generation: 2 });
+  const ev = n.checkModelDrift('model-b', scope(2));
   assert.strictEqual(sendBtn.clicks, 0, '绝不得点击发送按钮');
   assert.strictEqual(ev.stopped, false, '未找到停止按钮时应如实报告');
   console.log('PASS  空闲态（按钮为 Send message）绝不误点');
@@ -145,7 +148,7 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(true);
   n.resetModelBaseline('model-a');
 
-  n.checkModelDrift('model-b', { generation: 2 });
+  n.checkModelDrift('model-b', scope(2));
   assert.strictEqual(inLog.clicks, 0, '记录区按钮不得点击');
   assert.strictEqual(disabled.clicks, 0, '禁用按钮不得点击');
   console.log('PASS  排除 [role=log] 内与 disabled 按钮');
@@ -159,14 +162,41 @@ function loadNotifier() {
   n.setModelDriftStopEnabled(false);
   n.resetModelBaseline('model-a');
 
-  const ev = n.checkModelDrift('model-b', { generation: 2 });
+  const ev = n.checkModelDrift('model-b', scope(2));
   assert.ok(ev, '关闭时仍应返回事件供 HUD 记录');
   assert.strictEqual(ev.enabled, false);
   assert.strictEqual(stopBtn.clicks, 0, '开关关闭时不得点击');
   console.log('PASS  开关关闭时只记录不动作');
 }
 
-/* ---------- 7. 新增代码不含任何导致页面刷新的 API ---------- */
+/* ---------- 7. 不同对话的历史基准绝不交叉，也不能使用陈旧作用域 ---------- */
+{
+  const stopBtn=makeButton('Stop generating');
+  installDom([stopBtn]);
+  const n=loadNotifier();n.setModelDriftStopEnabled(true);
+  const other='22222222-2222-2222-2222-222222222222';
+  n.resetModelBaseline('model-a');
+  global.location.pathname='/agent/'+other;
+  assert.strictEqual(n.modelBaseline(),null);
+  assert.strictEqual(n.checkModelDrift('model-b',{generation:2,conversationId:other}),null);
+  assert.strictEqual(stopBtn.clicks,0,'新对话第一轮不能与旧对话比对');
+  assert.strictEqual(n.modelBaseline(),'model-b');
+  assert.strictEqual(n.checkModelDrift('model-c',scope(3)),null,'陈旧 A 对话事件不能操作 B');
+  assert.strictEqual(n.checkModelDrift('model-c',{generation:3,conversationId:other}).stopped,true);
+  assert.strictEqual(stopBtn.clicks,1);
+  global.location.pathname='/agent/'+CONVERSATION_ID;
+  assert.strictEqual(n.modelBaseline(),'model-a','返回 A 使用其独立历史');
+  assert.strictEqual(n.checkModelDrift('model-a',scope(4)),null);
+  assert.strictEqual(n.checkRouteSwitch('model-a','model-d',{generation:5,conversationId:other}),null);
+  assert.strictEqual(stopBtn.clicks,1,'其他对话的换模信号不能操作当前对话');
+  global.location.pathname='/agent';
+  assert.strictEqual(n.modelBaseline(),null);
+  assert.strictEqual(n.checkModelDrift('model-d',scope(6)),null);
+  assert.strictEqual(stopBtn.clicks,1,'空白新对话页不能自动停止');
+  console.log('PASS  对话 ID 绑定、返回历史对话和无 ID 页均不会跨对话误停');
+}
+
+/* ---------- 8. 新增代码不含任何导致页面刷新的 API ---------- */
 {
   const start = source.indexOf('模型名漂移自动停止');
   const end = source.indexOf('function triggerEscapeKey', start);
