@@ -1,0 +1,26 @@
+{
+  "version": "2026.09.24.8",
+  "assets": {
+    "AuthBridge.js": "4c13810b3399aedb1a34de59ca1111498cb7a9b5303fa1362940be6519b5e750",
+    "PageBridge.js": "f51cb3967f4364b20e4a1521d635cbe9e907e71c7b827b28d61509309d64bd2c",
+    "CandidateBridge.js": "c17e5c32e2b8f8b24cbd099f761e383caaec103f3812b90a01e4321d65cb80e7",
+    "ConversationRecovery.js": "3305003f6676872708d7fcc6ba1abb73c8bb5a5f73c98f3dacebc409c72228a8",
+    "FollowLatest.js": "0b5e6250c4c05caab5d4f70ee399266a05fe295c5cc7005c1e9c674b81a50782",
+    "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
+    "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
+    "arena-model-probe.inject.js": "69157e975b9a82b73de494c6858c440784a4753ccf7a18da7537953e39d26fc4"
+  },
+  "resources": {
+    "welcome.html": "b826959621dc4435e40e2e6633cce0e871fa040b92dd9efaf30d5a6d7e727ac4",
+    "demo.html": "6fc650638e60af2285ba51e363aa047b4299df794ea46b28dd27852c23918516",
+    "gallery.html": "60ff535554b21e25df64c3f85885b0e5226895be05937b560f8993dfeed05739",
+    "WebView2-LICENSE.txt": "24deadea987f1c7682753a8cef4e70bde8a13cc65684e06cab9a965469362075",
+    "WebView2-NOTICE.txt": "9dd2e51ad1f27741d0cbf74227d03fecf55c43e3081501f9d7f553b16d33835e"
+  },
+  "adapter": "2cdfd5ee74a46cc857f43e5e0566069ac15ab474d577f934b680c668b1a7d935",
+  "hitRename": "ffabc77811fde3268d5bfaddb2f1cf8183796aab102b857dd02447c8ebf2152c",
+  "accountCompat": "9ef8669120c881e4537f8c97ff171d851c00452190f563b88e72bf2da2198093",
+  "sessionUsage": "bae8cdb96cf53991e9e235982d5b4f334c9db6f4a93baa6dd86108da8da8153e",
+  "outputSha256": "e796ee44c5ae4fcceb5e06fa236f378c5aad5e25143a5d1de409c1f9b248f98d",
+  "bytes": 483931
+}

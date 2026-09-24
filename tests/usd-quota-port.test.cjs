@@ -347,7 +347,7 @@ test('observers are disconnected on disposal and queued callbacks cannot resurre
 test('reinjection replaces the previous disposable implementation rather than keeping its flicker',()=>{
  const e=panelHarness();let refreshed=0,disposed=0;
  const old={version:'usd-quota-card.2',refresh(){refreshed++;},dispose(){disposed++;delete e.window[KEY];}};e.window[KEY]=old;
- const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.equal(widget.version,'usd-quota-card.4');
+ const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.equal(widget.version,'usd-quota-card.5');
  assert.equal(e.window[KEY],widget);assert.equal(e.cards().length,1);assert.equal(e.timers.size,1);widget.dispose();
 });
 test('stale warning updates only once when the five-minute boundary is crossed',()=>{

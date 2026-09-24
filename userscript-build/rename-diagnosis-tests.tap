@@ -1,0 +1,12 @@
+✔ deployed user.js contains the exact inspected rename and CandidateBridge implementations (8.0537ms)
+✔ pointerdown-only menu: real bridge pointerdown works, click does not open menu (3.7433ms)
+✔ current auto-renamer times out on pointerdown-only menu and suppresses further attempts (4.6184ms)
+✔ sidebar not rendered after fixed delay: fails immediately and will not retry after it becomes ready (2.7015ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 208.5946

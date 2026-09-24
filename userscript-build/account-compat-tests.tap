@@ -1,0 +1,1921 @@
+TAP version 13
+# Subtest: 9.17.9 distinguishes request, response, route and protocol providers
+ok 1 - 9.17.9 distinguishes request, response, route and protocol providers
+  ---
+  duration_ms: 30.6471
+  type: 'test'
+  ...
+# Subtest: ambiguous trace preserves call list without guessing effort
+ok 2 - ambiguous trace preserves call list without guessing effort
+  ---
+  duration_ms: 2.5019
+  type: 'test'
+  ...
+# Subtest: latest trace turn ignores older turns and other run IDs
+ok 3 - latest trace turn ignores older turns and other run IDs
+  ---
+  duration_ms: 18.2502
+  type: 'test'
+  ...
+# Subtest: same-session next turn rejects prior trace and accepts newer turn; navigation discards token
+ok 4 - same-session next turn rejects prior trace and accepts newer turn; navigation discards token
+  ---
+  duration_ms: 1106.3784
+  type: 'test'
+  ...
+# Subtest: HTTP 429 backoff survives reset and prevents another request
+ok 5 - HTTP 429 backoff survives reset and prevents another request
+  ---
+  duration_ms: 5.2881
+  type: 'test'
+  ...
+# Subtest: final detail refresh works after ordinary collection is complete and emits HUD update
+ok 6 - final detail refresh works after ordinary collection is complete and emits HUD update
+  ---
+  duration_ms: 1061.6541
+  type: 'test'
+  ...
+# Subtest: balance endpoint is disabled without starting a request or timeout
+ok 7 - balance endpoint is disabled without starting a request or timeout
+  ---
+  duration_ms: 1.6678
+  type: 'test'
+  ...
+# Subtest: balance rejects a foreign origin without network access
+ok 8 - balance rejects a foreign origin without network access
+  ---
+  duration_ms: 2.6055
+  type: 'test'
+  ...
+# Subtest: PageBridge detects completed, streaming and failed calls
+ok 9 - PageBridge detects completed, streaming and failed calls
+  ---
+  duration_ms: 11.1234
+  type: 'test'
+  ...
+# Subtest: pending tool output remains unfinished even with ready status
+ok 10 - pending tool output remains unfinished even with ready status
+  ---
+  duration_ms: 6.7312
+  type: 'test'
+  ...
+# Subtest: missing React state falls back to DOM and ignores stop buttons inside the log
+ok 11 - missing React state falls back to DOM and ignores stop buttons inside the log
+  ---
+  duration_ms: 2.0455
+  type: 'test'
+  ...
+# Subtest: gacha action preserves drafts and blocks attachments
+ok 12 - gacha action preserves drafts and blocks attachments
+  ---
+  duration_ms: 5.6815
+  type: 'test'
+  ...
+# Subtest: gacha new conversation waits for current generation
+ok 13 - gacha new conversation waits for current generation
+  ---
+  duration_ms: 1.9451
+  type: 'test'
+  ...
+# Subtest: recovery refuses actions before page readiness
+ok 14 - recovery refuses actions before page readiness
+  ---
+  duration_ms: 4.275
+  type: 'test'
+  ...
+# Subtest: recovery is bound to body identity
+ok 15 - recovery is bound to body identity
+  ---
+  duration_ms: 5.1045
+  type: 'test'
+  ...
+# Subtest: failed preparation invalidates previous recovery plan
+ok 16 - failed preparation invalidates previous recovery plan
+  ---
+  duration_ms: 1.697
+  type: 'test'
+  ...
+# Subtest: recovery removes only confirmed orphan and supports versioned reinjection
+ok 17 - recovery removes only confirmed orphan and supports versioned reinjection
+  ---
+  duration_ms: 2.3855
+  type: 'test'
+  ...
+# Subtest: stream termination distinguishes finished canceled failed and truncated
+ok 18 - stream termination distinguishes finished canceled failed and truncated
+  ---
+  duration_ms: 67.6529
+  type: 'test'
+  ...
+# Subtest: existing completion frame support still publishes completion
+ok 19 - existing completion frame support still publishes completion
+  ---
+  duration_ms: 8.4651
+  type: 'test'
+  ...
+# Subtest: diagnostic hooks capture parse fallbacks and cannot break parsing
+ok 20 - diagnostic hooks capture parse fallbacks and cannot break parsing
+  ---
+  duration_ms: 24.6662
+  type: 'test'
+  ...
+# Subtest: welcome avoids implying that asset merging upgrades desktop executable
+ok 21 - welcome avoids implying that asset merging upgrades desktop executable
+  ---
+  duration_ms: 1.287
+  type: 'test'
+  ...
+# Subtest: only exact normalized pathname is blocked, regardless of query or origin
+ok 22 - only exact normalized pathname is blocked, regardless of query or origin
+  ---
+  duration_ms: 66.3921
+  type: 'test'
+  ...
+# Subtest: fetch, XHR, beacon and streaming transports do not send blocked endpoint to network
+ok 23 - fetch, XHR, beacon and streaming transports do not send blocked endpoint to network
+  ---
+  duration_ms: 39.1029
+  type: 'test'
+  ...
+# Subtest: gacha new/fill/send wait on loading indicator without staged attachments
+ok 24 - gacha new/fill/send wait on loading indicator without staged attachments
+  ---
+  duration_ms: 25.0339
+  type: 'test'
+  ...
+# Subtest: spinner disappears: new-chat action resumes
+ok 25 - spinner disappears: new-chat action resumes
+  ---
+  duration_ms: 2.1865
+  type: 'test'
+  ...
+# Subtest: real attachments still stop both gacha actions and incremental typing even with spinner
+ok 26 - real attachments still stop both gacha actions and incremental typing even with spinner
+  ---
+  duration_ms: 12.1317
+  type: 'test'
+  ...
+# Subtest: hidden indicators and indicators inside response logs do not block new chat
+ok 27 - hidden indicators and indicators inside response logs do not block new chat
+  ---
+  duration_ms: 5.0678
+  type: 'test'
+  ...
+# Subtest: typing waits with no key events, then resumes with exactly one character
+ok 28 - typing waits with no key events, then resumes with exactly one character
+  ---
+  duration_ms: 6.8377
+  type: 'test'
+  ...
+# Subtest: spinner appearing during key handler waits before insertion and still releases key
+ok 29 - spinner appearing during key handler waits before insertion and still releases key
+  ---
+  duration_ms: 3.7861
+  type: 'test'
+  ...
+# Subtest: rename menu locates nested button through up to four containers
+ok 30 - rename menu locates nested button through up to four containers
+  ---
+  duration_ms: 11.708
+  type: 'test'
+  ...
+# Subtest: renameMenuClick provides click path without also sending pointerdown
+ok 31 - renameMenuClick provides click path without also sending pointerdown
+  ---
+  duration_ms: 4.7897
+  type: 'test'
+  ...
+# Subtest: ambiguous current links remain rejected
+ok 32 - ambiguous current links remain rejected
+  ---
+  duration_ms: 1.6373
+  type: 'test'
+  ...
+# Subtest: missing, ambiguous or too-deep menu fails without clicks
+ok 33 - missing, ambiguous or too-deep menu fails without clicks
+  ---
+  duration_ms: 12.8854
+  type: 'test'
+  ...
+# Subtest: renameSaveReady reports enabled/disabled save button
+ok 34 - renameSaveReady reports enabled/disabled save button
+  ---
+  duration_ms: 3.6885
+  type: 'test'
+  ...
+# Subtest: full alert module loads and boot explicitly starts it
+ok 35 - full alert module loads and boot explicitly starts it
+  ---
+  duration_ms: 13.5236
+  type: 'test'
+  ...
+# Subtest: visible Chinese and English verification dialogs detected
+ok 36 - visible Chinese and English verification dialogs detected
+  ---
+  duration_ms: 16.1615
+  type: 'test'
+  ...
+# Subtest: ordinary dialog, hidden challenge and invisible ancestors ignored
+ok 37 - ordinary dialog, hidden challenge and invisible ancestors ignored
+  ---
+  duration_ms: 7.4582
+  type: 'test'
+  ...
+# Subtest: known visible challenge frame detected but checkbox size and lookalike domains ignored
+ok 38 - known visible challenge frame detected but checkbox size and lookalike domains ignored
+  ---
+  duration_ms: 8.2093
+  type: 'test'
+  ...
+# Subtest: one alarm per appearance, transient disappearance does not rearm
+ok 39 - one alarm per appearance, transient disappearance does not rearm
+  ---
+  duration_ms: 2.2605
+  type: 'test'
+  ...
+# Subtest: notification switch suppresses warning and can enable an existing popup
+ok 40 - notification switch suppresses warning and can enable an existing popup
+  ---
+  duration_ms: 1.7964
+  type: 'test'
+  ...
+# Subtest: restarting watcher cleans interval and old checks cannot sound
+ok 41 - restarting watcher cleans interval and old checks cannot sound
+  ---
+  duration_ms: 4.4338
+  type: 'test'
+  ...
+# Subtest: detector and sound exceptions never escape into page
+ok 42 - detector and sound exceptions never escape into page
+  ---
+  duration_ms: 6.5015
+  type: 'test'
+  ...
+# Subtest: warning plays three moderate pulses and releases AudioContext
+ok 43 - warning plays three moderate pulses and releases AudioContext
+  ---
+  duration_ms: 1.9314
+  type: 'test'
+  ...
+# Subtest: captured snapshot records three successful public sources and hashes
+ok 44 - captured snapshot records three successful public sources and hashes
+  ---
+  duration_ms: 12.0167
+  type: 'test'
+  ...
+# Subtest: bundled catalog exactly reproduces the checked-in snapshot
+ok 45 - bundled catalog exactly reproduces the checked-in snapshot
+  ---
+  duration_ms: 58.1335
+  type: 'test'
+  ...
+# Subtest: every catalog name classifies to its documented organization
+ok 46 - every catalog name classifies to its documented organization
+  ---
+  duration_ms: 76.8375
+  type: 'test'
+  ...
+# Subtest: new and previously missing series are classified precisely
+ok 47 - new and previously missing series are classified precisely
+  ---
+  duration_ms: 0.7364
+  type: 'test'
+  ...
+# Subtest: documented derivative organization beats base-model regex
+ok 48 - documented derivative organization beats base-model regex
+  ---
+  duration_ms: 0.1737
+  type: 'test'
+  ...
+# Subtest: opaque aliases give only the documented family, never invented generations
+ok 49 - opaque aliases give only the documented family, never invented generations
+  ---
+  duration_ms: 4.1593
+  type: 'test'
+  ...
+# Subtest: catalog accepts casing and trimming but does not normalize arbitrary aliases
+ok 50 - catalog accepts casing and trimming but does not normalize arbitrary aliases
+  ---
+  duration_ms: 0.2035
+  type: 'test'
+  ...
+# Subtest: new numeric rules do not claim larger unobserved versions as known subversions
+ok 51 - new numeric rules do not claim larger unobserved versions as known subversions
+  ---
+  duration_ms: 0.3827
+  type: 'test'
+  ...
+# Subtest: historical names still classify and unlisted names remain unknown
+ok 52 - historical names still classify and unlisted names remain unknown
+  ---
+  duration_ms: 3.4911
+  type: 'test'
+  ...
+# Subtest: catalog membership alone produces no evidence or resolved verdict
+ok 53 - catalog membership alone produces no evidence or resolved verdict
+  ---
+  duration_ms: 2.8085
+  type: 'test'
+  ...
+# Subtest: real name evidence retains original identifier and does not infer alias version
+ok 54 - real name evidence retains original identifier and does not infer alias version
+  ---
+  duration_ms: 0.2655
+  type: 'test'
+  ...
+# Subtest: frontier is lineage-specific and legacy unobserved generations are not current
+ok 55 - frontier is lineage-specific and legacy unobserved generations are not current
+  ---
+  duration_ms: 0.1944
+  type: 'test'
+  ...
+# Subtest: RSC parser joins split chunks and extracts distinct data layers
+ok 56 - RSC parser joins split chunks and extracts distinct data layers
+  ---
+  duration_ms: 6.9895
+  type: 'test'
+  ...
+# Subtest: fetch failures or incomplete/challenge payloads cannot create an empty update
+ok 57 - fetch failures or incomplete/challenge payloads cannot create an empty update
+  ---
+  duration_ms: 1.1468
+  type: 'test'
+  ...
+# Subtest: parser never evaluates script and ignores unrelated model-looking objects
+ok 58 - parser never evaluates script and ignores unrelated model-looking objects
+  ---
+  duration_ms: 1.6958
+  type: 'test'
+  ...
+# Subtest: packing preserves index and provenance and rejects invalid source references
+ok 59 - packing preserves index and provenance and rejects invalid source references
+  ---
+  duration_ms: 2.7087
+  type: 'test'
+  ...
+# Subtest: conflicting organizations block exact classification rather than taking first/last
+ok 60 - conflicting organizations block exact classification rather than taking first/last
+  ---
+  duration_ms: 3.3031
+  type: 'test'
+  ...
+# Subtest: boot starts choice watcher using the existing notification switch
+ok 61 - boot starts choice watcher using the existing notification switch
+  ---
+  duration_ms: 18.2528
+  type: 'test'
+  ...
+# Subtest: matching interactive card is detected inside a transcript role=log
+ok 62 - matching interactive card is detected inside a transcript role=log
+  ---
+  duration_ms: 15.2899
+  type: 'test'
+  ...
+# Subtest: scoped detection excludes a pending choice in another conversation log
+ok 63 - scoped detection excludes a pending choice in another conversation log
+  ---
+  duration_ms: 9.306
+  type: 'test'
+  ...
+# Subtest: class order, spacing and optional layout tokens do not matter
+ok 64 - class order, spacing and optional layout tokens do not matter
+  ---
+  duration_ms: 3.7462
+  type: 'test'
+  ...
+# Subtest: outside transcript or missing signature stays silent
+ok 65 - outside transcript or missing signature stays silent
+  ---
+  duration_ms: 1.9201
+  type: 'test'
+  ...
+# Subtest: single Copy button and non-interactive card stay silent; one radio qualifies
+ok 66 - single Copy button and non-interactive card stay silent; one radio qualifies
+  ---
+  duration_ms: 7.7357
+  type: 'test'
+  ...
+# Subtest: saved HTML Summary shape is not an unanswered choice card
+ok 67 - saved HTML Summary shape is not an unanswered choice card
+  ---
+  duration_ms: 1.8856
+  type: 'test'
+  ...
+# Subtest: hidden, inert, aria-hidden, zero-size and invisible ancestor are excluded
+ok 68 - hidden, inert, aria-hidden, zero-size and invisible ancestor are excluded
+  ---
+  duration_ms: 38.8538
+  type: 'test'
+  ...
+# Subtest: disabled controls, disabled fieldsets and single remaining button are excluded
+ok 69 - disabled controls, disabled fieldsets and single remaining button are excluded
+  ---
+  duration_ms: 8.926
+  type: 'test'
+  ...
+# Subtest: rendered code examples are excluded
+ok 70 - rendered code examples are excluded
+  ---
+  duration_ms: 4.6771
+  type: 'test'
+  ...
+# Subtest: deduplicates ongoing display and card children replacement without reading text
+ok 71 - deduplicates ongoing display and card children replacement without reading text
+  ---
+  duration_ms: 5.8994
+  type: 'test'
+  ...
+# Subtest: stable metadata ID survives message replacement; another message alerts
+ok 72 - stable metadata ID survives message replacement; another message alerts
+  ---
+  duration_ms: 7.0933
+  type: 'test'
+  ...
+# Subtest: boolean marker is not mistaken for a unique ID; batch arrival plays once
+ok 73 - boolean marker is not mistaken for a unique ID; batch arrival plays once
+  ---
+  duration_ms: 6.5982
+  type: 'test'
+  ...
+# Subtest: notification off defers announcement until enabled, then stays deduplicated
+ok 74 - notification off defers announcement until enabled, then stays deduplicated
+  ---
+  duration_ms: 7.4979
+  type: 'test'
+  ...
+# Subtest: one missed poll is tolerated; two misses rearm a later choice
+ok 75 - one missed poll is tolerated; two misses rearm a later choice
+  ---
+  duration_ms: 3.1155
+  type: 'test'
+  ...
+# Subtest: route change rearms IDs; reinjection stops old watcher and stop cancels polling
+ok 76 - route change rearms IDs; reinjection stops old watcher and stop cancels polling
+  ---
+  duration_ms: 5.2987
+  type: 'test'
+  ...
+# Subtest: detector and asynchronous sound errors do not escape
+ok 77 - detector and asynchronous sound errors do not escape
+  ---
+  duration_ms: 11.7776
+  type: 'test'
+  ...
+# Subtest: four distinct ding-dong notes and context release after end
+ok 78 - four distinct ding-dong notes and context release after end
+  ---
+  duration_ms: 6.7571
+  type: 'test'
+  ...
+# Subtest: suspended audio resumes; blocked or missing audio is harmless
+ok 79 - suspended audio resumes; blocked or missing audio is harmless
+  ---
+  duration_ms: 7.3741
+  type: 'test'
+  ...
+# Subtest: fallback timeout releases audio once even without onended
+ok 80 - fallback timeout releases audio once even without onended
+  ---
+  duration_ms: 1.4569
+  type: 'test'
+  ...
+# Subtest: chime lasts 1.5 seconds with moderate 0.20 peak and soft envelope; context closes
+ok 81 - chime lasts 1.5 seconds with moderate 0.20 peak and soft envelope; context closes
+  ---
+  duration_ms: 2.776
+  type: 'test'
+  ...
+# Subtest: one custom chime per notification with granted permission
+ok 82 - one custom chime per notification with granted permission
+  ---
+  duration_ms: 6.2315
+  type: 'test'
+  ...
+# Subtest: one custom chime per notification with denied permission
+ok 83 - one custom chime per notification with denied permission
+  ---
+  duration_ms: 13.5891
+  type: 'test'
+  ...
+# Subtest: one custom chime per notification with missing permission
+ok 84 - one custom chime per notification with missing permission
+  ---
+  duration_ms: 3.4697
+  type: 'test'
+  ...
+# Subtest: one custom chime per notification with default permission
+ok 85 - one custom chime per notification with default permission
+  ---
+  duration_ms: 3.0683
+  type: 'test'
+  ...
+# Subtest: disabled notifications do not play sound
+ok 86 - disabled notifications do not play sound
+  ---
+  duration_ms: 1.7116
+  type: 'test'
+  ...
+# Subtest: suspended audio resumes before scheduling
+ok 87 - suspended audio resumes before scheduling
+  ---
+  duration_ms: 2.2165
+  type: 'test'
+  ...
+# Subtest: audio resume failure is contained and context released
+ok 88 - audio resume failure is contained and context released
+  ---
+  duration_ms: 3.871
+  type: 'test'
+  ...
+# Subtest: full notifier module loads and preserves legacy chime export
+ok 89 - full notifier module loads and preserves legacy chime export
+  ---
+  duration_ms: 22.0557
+  type: 'test'
+  ...
+# Subtest: main only compares models from the current conversation, run and generation
+ok 90 - main only compares models from the current conversation, run and generation
+  ---
+  duration_ms: 31.25
+  type: 'test'
+  ...
+# Subtest: first session has no initial delay; completion starts exactly ten seconds
+ok 91 - first session has no initial delay; completion starts exactly ten seconds
+  ---
+  duration_ms: 18.2104
+  type: 'test'
+  ...
+# Subtest: duplicate completion and polling never extend the deadline or restart an expired turn
+ok 92 - duplicate completion and polling never extend the deadline or restart an expired turn
+  ---
+  duration_ms: 5.6
+  type: 'test'
+  ...
+# Subtest: each new turn gets its own ten seconds
+ok 93 - each new turn gets its own ten seconds
+  ---
+  duration_ms: 4.356
+  type: 'test'
+  ...
+# Subtest: cancel removes a pending generic callback
+ok 94 - cancel removes a pending generic callback
+  ---
+  duration_ms: 11.097
+  type: 'test'
+  ...
+# Subtest: invalid predicate prevents a generic delayed callback
+ok 95 - invalid predicate prevents a generic delayed callback
+  ---
+  duration_ms: 30.0238
+  type: 'test'
+  ...
+# Subtest: repeated scheduling uses original deadline and only executes once
+ok 96 - repeated scheduling uses original deadline and only executes once
+  ---
+  duration_ms: 23.758
+  type: 'test'
+  ...
+# Subtest: gacha cannot create next conversation during cooldown; proceeds at deadline
+ok 97 - gacha cannot create next conversation during cooldown; proceeds at deadline
+  ---
+  duration_ms: 23.1525
+  type: 'test'
+  ...
+# Subtest: missing cooldown probe fails closed for gacha while ordinary actions remain usable
+ok 98 - missing cooldown probe fails closed for gacha while ordinary actions remain usable
+  ---
+  duration_ms: 1.4851
+  type: 'test'
+  ...
+# Subtest: session end triggers Esc immediately only when enabled (true), retaining cooldown
+ok 99 - session end triggers Esc immediately only when enabled (true), retaining cooldown
+  ---
+  duration_ms: 17.9382
+  type: 'test'
+  ...
+# Subtest: session end triggers Esc immediately only when enabled (false), retaining cooldown
+ok 100 - session end triggers Esc immediately only when enabled (false), retaining cooldown
+  ---
+  duration_ms: 17.075
+  type: 'test'
+  ...
+# Subtest: HUD restores the last local position on construction and clamps stale coordinates
+ok 101 - HUD restores the last local position on construction and clamps stale coordinates
+  ---
+  duration_ms: 24.034
+  type: 'test'
+  ...
+# Subtest: drag persists only after movement, and next HUD instance reuses saved position
+ok 102 - drag persists only after movement, and next HUD instance reuses saved position
+  ---
+  duration_ms: 11.4547
+  type: 'test'
+  ...
+# Subtest: invalid or blocked storage falls back gracefully while dragging stays usable
+ok 103 - invalid or blocked storage falls back gracefully while dragging stays usable
+  ---
+  duration_ms: 21.0197
+  type: 'test'
+  ...
+# Subtest: Material 3 floating surfaces keep static theme, responsive sizing and keyboard focus
+ok 104 - Material 3 floating surfaces keep static theme, responsive sizing and keyboard focus
+  ---
+  duration_ms: 5.0708
+  type: 'test'
+  ...
+# Subtest: HUD groups every diagnostic and action without losing escaped data
+ok 105 - HUD groups every diagnostic and action without losing escaped data
+  ---
+  duration_ms: 30.1064
+  type: 'test'
+  ...
+# Subtest: collapse remains accessible through rerender, drag ignores child controls, actions still dispatch
+ok 106 - collapse remains accessible through rerender, drag ignores child controls, actions still dispatch
+  ---
+  duration_ms: 5.3648
+  type: 'test'
+  ...
+# Subtest: expanded HUD is 734px tall while collapse and small viewports remain usable
+ok 107 - expanded HUD is 734px tall while collapse and small viewports remain usable
+  ---
+  duration_ms: 2.3494
+  type: 'test'
+  ...
+# Subtest: rerender keeps main/log scroll and the same quota card; collapsing and reopening does not jump
+ok 108 - rerender keeps main/log scroll and the same quota card; collapsing and reopening does not jump
+  ---
+  duration_ms: 6.9986
+  type: 'test'
+  ...
+# PASS  同名 / 大小写 / -vertex 后缀不触发停止
+# PASS  模型名不一致时点击停止并前移基准
+# PASS  同一轮内不重复点击
+# PASS  空闲态（按钮为 Send message）绝不误点
+# PASS  排除 [role=log] 内与 disabled 按钮
+# PASS  开关关闭时只记录不动作
+# PASS  对话 ID 绑定、返回历史对话和无 ID 页均不会跨对话误停
+# PASS  新增代码不含任何导航/刷新 API
+# TOTAL: model-drift-stop 全部通过
+# Subtest: tests\\model-drift-stop.test.cjs
+ok 13 - tests\\model-drift-stop.test.cjs
+  ---
+  duration_ms: 6664.6169
+  type: 'test'
+  ...
+# Subtest: injected UI has no animation definitions, timed transitions or backdrop blur
+ok 110 - injected UI has no animation definitions, timed transitions or backdrop blur
+  ---
+  duration_ms: 4.102
+  type: 'test'
+  ...
+# Subtest: refresh uses static busy feedback, deduplicates clicks and schedules no timer
+ok 111 - refresh uses static busy feedback, deduplicates clicks and schedules no timer
+  ---
+  duration_ms: 0.6882
+  type: 'test'
+  ...
+# Subtest: refresh failures clear busy state and permit retry without visual timers
+ok 112 - refresh failures clear busy state and permit retry without visual timers
+  ---
+  duration_ms: 0.4376
+  type: 'test'
+  ...
+# Subtest: missing refresh callback is harmless and pulse updates remain immediate
+ok 113 - missing refresh callback is harmless and pulse updates remain immediate
+  ---
+  duration_ms: 0.5699
+  type: 'test'
+  ...
+# Subtest: broadcast posts JSON as text/plain to notify2 without triggering a CORS preflight
+ok 114 - broadcast posts JSON as text/plain to notify2 without triggering a CORS preflight
+  ---
+  duration_ms: 25.9394
+  type: 'test'
+  ...
+# Subtest: broadcast treats an opaque no-cors response as delivered
+ok 115 - broadcast treats an opaque no-cors response as delivered
+  ---
+  duration_ms: 4.5602
+  type: 'test'
+  ...
+# Subtest: broadcast resolves false instead of throwing when the endpoint fails
+ok 116 - broadcast resolves false instead of throwing when the endpoint fails
+  ---
+  duration_ms: 2.8312
+  type: 'test'
+  ...
+# Subtest: broadcast treats non-2xx as failure without throwing
+ok 117 - broadcast treats non-2xx as failure without throwing
+  ---
+  duration_ms: 6.9843
+  type: 'test'
+  ...
+# Subtest: broadcastHit builds the documented payload shape
+ok 118 - broadcastHit builds the documented payload shape
+  ---
+  duration_ms: 10.5798
+  type: 'test'
+  ...
+# Subtest: broadcastHit carries the resumed flag and tolerates a missing model name
+ok 119 - broadcastHit carries the resumed flag and tolerates a missing model name
+  ---
+  duration_ms: 8.5503
+  type: 'test'
+  ...
+# Subtest: broadcastStop builds a warning payload with a machine-readable reason
+ok 120 - broadcastStop builds a warning payload with a machine-readable reason
+  ---
+  duration_ms: 22.0657
+  type: 'test'
+  ...
+# Subtest: broadcastStop tolerates a missing reason, detail and round
+ok 121 - broadcastStop tolerates a missing reason, detail and round
+  ---
+  duration_ms: 5.3533
+  type: 'test'
+  ...
+# Subtest: embedded bridge exactly matches canonical PageBridge.js
+ok 122 - embedded bridge exactly matches canonical PageBridge.js
+  ---
+  duration_ms: 6.6162
+  type: 'test'
+  ...
+# Subtest: probe alone installs missing bridge without fetch, eval or starting a conversation
+ok 123 - probe alone installs missing bridge without fetch, eval or starting a conversation
+  ---
+  duration_ms: 44.049
+  type: 'test'
+  ...
+# Subtest: legacy and incomplete bridges are replaced; compatible bridge is reused
+ok 124 - legacy and incomplete bridges are replaced; compatible bridge is reused
+  ---
+  duration_ms: 16.7245
+  type: 'test'
+  ...
+# Subtest: later desktop overwrite or deletion self-recovers and preserves ownership token
+ok 125 - later desktop overwrite or deletion self-recovers and preserves ownership token
+  ---
+  duration_ms: 6.9435
+  type: 'test'
+  ...
+# Subtest: real panel start succeeds when only probe was loaded; remains idle before user start
+ok 126 - real panel start succeeds when only probe was loaded; remains idle before user start
+  ---
+  duration_ms: 14.5517
+  type: 'test'
+  ...
+# Subtest: incremental bridge appends only new characters, preserving Unicode
+ok 127 - incremental bridge appends only new characters, preserving Unicode
+  ---
+  duration_ms: 14.0232
+  type: 'test'
+  ...
+# Subtest: incremental bridge rejects missing owner, mismatched draft and non-prefix replacement
+ok 128 - incremental bridge rejects missing owner, mismatched draft and non-prefix replacement
+  ---
+  duration_ms: 3.4434
+  type: 'test'
+  ...
+# Subtest: cooldown, captcha and dialogs prevent incremental input
+ok 129 - cooldown, captcha and dialogs prevent incremental input
+  ---
+  duration_ms: 1.4567
+  type: 'test'
+  ...
+# Subtest: desktop gacha requests are gated while page runner owns actions
+ok 130 - desktop gacha requests are gated while page runner owns actions
+  ---
+  duration_ms: 2.1201
+  type: 'test'
+  ...
+# Subtest: bulk delta rejected without keyboard events or writes
+ok 131 - bulk delta rejected without keyboard events or writes
+  ---
+  duration_ms: 1.2744
+  type: 'test'
+  ...
+# Subtest: cancelled keydown prevents insertion but releases key
+ok 132 - cancelled keydown prevents insertion but releases key
+  ---
+  duration_ms: 3.3211
+  type: 'test'
+  ...
+# Subtest: cancelled keypress prevents insertion but releases key
+ok 133 - cancelled keypress prevents insertion but releases key
+  ---
+  duration_ms: 1.2119
+  type: 'test'
+  ...
+# Subtest: uppercase key metadata and Shift+Enter avoid plain Enter submit handlers
+ok 134 - uppercase key metadata and Shift+Enter avoid plain Enter submit handlers
+  ---
+  duration_ms: 2.5513
+  type: 'test'
+  ...
+# Subtest: handler edits to draft are preserved instead of duplicate insertion
+ok 135 - handler edits to draft are preserved instead of duplicate insertion
+  ---
+  duration_ms: 1.428
+  type: 'test'
+  ...
+# Subtest: owner loss during keydown cancels actual insertion
+ok 136 - owner loss during keydown cancels actual insertion
+  ---
+  duration_ms: 4.0625
+  type: 'test'
+  ...
+# Subtest: only the current owned conversation choice can bypass a busy generation for New Chat
+ok 137 - only the current owned conversation choice can bypass a busy generation for New Chat
+  ---
+  duration_ms: 2.6729
+  type: 'test'
+  ...
+# Subtest: 运行中状态被持久化，包含提示词与轮次
+ok 138 - 运行中状态被持久化，包含提示词与轮次
+  ---
+  duration_ms: 28.3652
+  type: 'test'
+  ...
+# Subtest: 存档不含 generation 等刷新后必然失效的运行期量
+ok 139 - 存档不含 generation 等刷新后必然失效的运行期量
+  ---
+  duration_ms: 2.9794
+  type: 'test'
+  ...
+# Subtest: 手动停止后存档为 stopped，不会被自动恢复
+ok 140 - 手动停止后存档为 stopped，不会被自动恢复
+  ---
+  duration_ms: 2.2941
+  type: 'test'
+  ...
+# Subtest: 暂停后的存档不会被自动恢复
+ok 141 - 暂停后的存档不会被自动恢复
+  ---
+  duration_ms: 8.7874
+  type: 'test'
+  ...
+# Subtest: 命中后的存档不会被自动恢复
+ok 142 - 命中后的存档不会被自动恢复
+  ---
+  duration_ms: 6.5996
+  type: 'test'
+  ...
+# Subtest: 超过 TTL 的陈旧存档不会被自动恢复
+ok 143 - 超过 TTL 的陈旧存档不会被自动恢复
+  ---
+  duration_ms: 3.1348
+  type: 'test'
+  ...
+# Subtest: 损坏或异常存档被安全拒绝
+ok 144 - 损坏或异常存档被安全拒绝
+  ---
+  duration_ms: 5.0776
+  type: 'test'
+  ...
+# Subtest: 刷新后从 running 存档恢复，接续轮次并继续下一轮
+ok 145 - 刷新后从 running 存档恢复，接续轮次并继续下一轮
+  ---
+  duration_ms: 7.2416
+  type: 'test'
+  ...
+# Subtest: 恢复时若上一轮仍在生成，先等待而不抢发新一轮
+ok 146 - 恢复时若上一轮仍在生成，先等待而不抢发新一轮
+  ---
+  duration_ms: 3.0313
+  type: 'test'
+  ...
+# Subtest: 恢复时当前会话出现待选项，按本轮完成继续下一轮
+ok 147 - 恢复时当前会话出现待选项，按本轮完成继续下一轮
+  ---
+  duration_ms: 4.927
+  type: 'test'
+  ...
+# Subtest: 恢复时上一轮回答命中目标，立即停止而不开新一轮
+ok 148 - 恢复时上一轮回答命中目标，立即停止而不开新一轮
+  ---
+  duration_ms: 2.0026
+  type: 'test'
+  ...
+# Subtest: 恢复时发现用户草稿则暂停保留现场
+ok 149 - 恢复时发现用户草稿则暂停保留现场
+  ---
+  duration_ms: 5.4829
+  type: 'test'
+  ...
+# Subtest: 恢复时检测到附件则暂停
+ok 150 - 恢复时检测到附件则暂停
+  ---
+  duration_ms: 2.3695
+  type: 'test'
+  ...
+# Subtest: persist=false 时完全不写存储
+ok 151 - persist=false 时完全不写存储
+  ---
+  duration_ms: 8.3321
+  type: 'test'
+  ...
+# Subtest: secondary matcher: sol, opus and gemini; GLM5.3 variants excluded; primary wins
+ok 152 - secondary matcher: sol, opus and gemini; GLM5.3 variants excluded; primary wins
+  ---
+  duration_ms: 16.9543
+  type: 'test'
+  ...
+# Subtest: secondary target does not stop: waits 40 seconds after completion then opens next round
+ok 153 - secondary target does not stop: waits 40 seconds after completion then opens next round
+  ---
+  duration_ms: 6.3831
+  type: 'test'
+  ...
+# Subtest: ordinary gpt-5 opens next round without secondary cooldown
+ok 154 - ordinary gpt-5 opens next round without secondary cooldown
+  ---
+  duration_ms: 2.391
+  type: 'test'
+  ...
+# Subtest: ordinary GLM5.3 opens next round without secondary cooldown
+ok 155 - ordinary GLM5.3 opens next round without secondary cooldown
+  ---
+  duration_ms: 6.1099
+  type: 'test'
+  ...
+# Subtest: ordinary glm-5.3 opens next round without secondary cooldown
+ok 156 - ordinary glm-5.3 opens next round without secondary cooldown
+  ---
+  duration_ms: 2.1333
+  type: 'test'
+  ...
+# Subtest: ordinary GLM 5.3-pro opens next round without secondary cooldown
+ok 157 - ordinary GLM 5.3-pro opens next round without secondary cooldown
+  ---
+  duration_ms: 2.1098
+  type: 'test'
+  ...
+# Subtest: ordinary glm_5_3 opens next round without secondary cooldown
+ok 158 - ordinary glm_5_3 opens next round without secondary cooldown
+  ---
+  duration_ms: 4.8607
+  type: 'test'
+  ...
+# Subtest: ordinary glm-5-3 opens next round without secondary cooldown
+ok 159 - ordinary glm-5-3 opens next round without secondary cooldown
+  ---
+  duration_ms: 8.116
+  type: 'test'
+  ...
+# Subtest: ordinary glm-5.3-flash opens next round without secondary cooldown
+ok 160 - ordinary glm-5.3-flash opens next round without secondary cooldown
+  ---
+  duration_ms: 2.3523
+  type: 'test'
+  ...
+# Subtest: ordinary contenders/glm-5.3-agent opens next round without secondary cooldown
+ok 161 - ordinary contenders/glm-5.3-agent opens next round without secondary cooldown
+  ---
+  duration_ms: 5.6585
+  type: 'test'
+  ...
+# Subtest: pending choice also starts the secondary target 40-second wait
+ok 162 - pending choice also starts the secondary target 40-second wait
+  ---
+  duration_ms: 6.5038
+  type: 'test'
+  ...
+# Subtest: panel description only lists the remaining secondary targets
+ok 163 - panel description only lists the remaining secondary targets
+  ---
+  duration_ms: 0.3246
+  type: 'test'
+  ...
+# Subtest: primary target containing a secondary keyword stops as a match
+ok 164 - primary target containing a secondary keyword stops as a match
+  ---
+  duration_ms: 3.9536
+  type: 'test'
+  ...
+# Subtest: primary target appearing during the 40 second secondary wait still stops
+ok 165 - primary target appearing during the 40 second secondary wait still stops
+  ---
+  duration_ms: 7.973
+  type: 'test'
+  ...
+# Subtest: captcha pause broadcasts exactly one gacha-stopped warning and never repeats
+ok 166 - captcha pause broadcasts exactly one gacha-stopped warning and never repeats
+  ---
+  duration_ms: 25.1749
+  type: 'test'
+  ...
+# Subtest: timeout pause is classified as timeout
+ok 167 - timeout pause is classified as timeout
+  ---
+  duration_ms: 8.8281
+  type: 'test'
+  ...
+# Subtest: uncaught runner error pauses and broadcasts reason error with the message as detail
+ok 168 - uncaught runner error pauses and broadcasts reason error with the message as detail
+  ---
+  duration_ms: 7.1863
+  type: 'test'
+  ...
+# Subtest: manual stop does not broadcast gacha-stopped
+ok 169 - manual stop does not broadcast gacha-stopped
+  ---
+  duration_ms: 5.7398
+  type: 'test'
+  ...
+# Subtest: target hit broadcasts gacha-hit only, never gacha-stopped
+ok 170 - target hit broadcasts gacha-hit only, never gacha-stopped
+  ---
+  duration_ms: 5.3809
+  type: 'test'
+  ...
+# Subtest: classifyPause maps every pause message family to a stable reason
+ok 171 - classifyPause maps every pause message family to a stable reason
+  ---
+  duration_ms: 5.8936
+  type: 'test'
+  ...
+# Subtest: target match is case insensitive contains matching, never a guessed family
+ok 172 - target match is case insensitive contains matching, never a guessed family
+  ---
+  duration_ms: 23.8993
+  type: 'test'
+  ...
+# Subtest: explicit start, incremental Unicode-safe input and delayed send
+ok 173 - explicit start, incremental Unicode-safe input and delayed send
+  ---
+  duration_ms: 6.5995
+  type: 'test'
+  ...
+# Subtest: target astra-preview stops next rounds but preserves generating answer
+ok 174 - target astra-preview stops next rounds but preserves generating answer
+  ---
+  duration_ms: 7.4256
+  type: 'test'
+  ...
+# Subtest: target FABLE-latest stops next rounds but preserves generating answer
+ok 175 - target FABLE-latest stops next rounds but preserves generating answer
+  ---
+  duration_ms: 2.7236
+  type: 'test'
+  ...
+# Subtest: non-target opens next round immediately without waiting 10 seconds
+ok 176 - non-target opens next round immediately without waiting 10 seconds
+  ---
+  duration_ms: 3.5768
+  type: 'test'
+  ...
+# Subtest: late target during answer completes as match without starting next round
+ok 177 - late target during answer completes as match without starting next round
+  ---
+  duration_ms: 3.7636
+  type: 'test'
+  ...
+# Subtest: pending user choice completes the owned round despite a busy React tool state
+ok 178 - pending user choice completes the owned round despite a busy React tool state
+  ---
+  duration_ms: 6.1148
+  type: 'test'
+  ...
+# Subtest: a choice does not override a primary target, and busy status alone does not complete a round
+ok 179 - a choice does not override a primary target, and busy status alone does not complete a round
+  ---
+  duration_ms: 2.3385
+  type: 'test'
+  ...
+# Subtest: webpage popup waits 5 seconds up to 5 times, then resumes if popup closes
+ok 180 - webpage popup waits 5 seconds up to 5 times, then resumes if popup closes
+  ---
+  duration_ms: 6.0986
+  type: 'test'
+  ...
+# Subtest: webpage popup pauses after 5 failed waits of 5 seconds
+ok 181 - webpage popup pauses after 5 failed waits of 5 seconds
+  ---
+  duration_ms: 2.8238
+  type: 'test'
+  ...
+# Subtest: unknown model skips the round and keeps running instead of pausing
+ok 182 - unknown model skips the round and keeps running instead of pausing
+  ---
+  duration_ms: 5.1991
+  type: 'test'
+  ...
+# Subtest: consecutive unknown-model timeouts eventually pause
+ok 183 - consecutive unknown-model timeouts eventually pause
+  ---
+  duration_ms: 2.4284
+  type: 'test'
+  ...
+# Subtest: old session model names and response body keywords cannot match
+ok 184 - old session model names and response body keywords cannot match
+  ---
+  duration_ms: 7.2634
+  type: 'test'
+  ...
+# Subtest: safety pauses on captcha
+ok 185 - safety pauses on captcha
+  ---
+  duration_ms: 7.1202
+  type: 'test'
+  ...
+# Subtest: safety pauses on limit
+ok 186 - safety pauses on limit
+  ---
+  duration_ms: 1.8507
+  type: 'test'
+  ...
+# Subtest: safety pauses on draft
+ok 187 - safety pauses on draft
+  ---
+  duration_ms: 5.5637
+  type: 'test'
+  ...
+# Subtest: safety pauses on attachment
+ok 188 - safety pauses on attachment
+  ---
+  duration_ms: 2.6712
+  type: 'test'
+  ...
+# Subtest: manual stop cancels subsequent typing and sending without deleting draft
+ok 189 - manual stop cancels subsequent typing and sending without deleting draft
+  ---
+  duration_ms: 6.1403
+  type: 'test'
+  ...
+# Subtest: start refuses existing drafts and concurrent generating sessions
+ok 190 - start refuses existing drafts and concurrent generating sessions
+  ---
+  duration_ms: 6.0532
+  type: 'test'
+  ...
+# Subtest: submission may navigate after generation begins without pausing too early
+ok 191 - submission may navigate after generation begins without pausing too early
+  ---
+  duration_ms: 10.2003
+  type: 'test'
+  ...
+# Subtest: new generation or user navigation after submission pauses instead of continuing
+ok 192 - new generation or user navigation after submission pauses instead of continuing
+  ---
+  duration_ms: 16.1843
+  type: 'test'
+  ...
+# Subtest: panel mounts idle, starts only on click and disposes previous interval/panel
+ok 193 - panel mounts idle, starts only on click and disposes previous interval/panel
+  ---
+  duration_ms: 5.8967
+  type: 'test'
+  ...
+# Subtest: missing bridge does not start a loop or take action ownership
+ok 194 - missing bridge does not start a loop or take action ownership
+  ---
+  duration_ms: 3.5823
+  type: 'test'
+  ...
+# Subtest: typing interval boundary 50ms, one Unicode scalar per step
+ok 195 - typing interval boundary 50ms, one Unicode scalar per step
+  ---
+  duration_ms: 5.6188
+  type: 'test'
+  ...
+# Subtest: typing interval boundary 100ms, one Unicode scalar per step
+ok 196 - typing interval boundary 100ms, one Unicode scalar per step
+  ---
+  duration_ms: 4.7571
+  type: 'test'
+  ...
+# Subtest: typing interval boundary 150ms, one Unicode scalar per step
+ok 197 - typing interval boundary 150ms, one Unicode scalar per step
+  ---
+  duration_ms: 4.0531
+  type: 'test'
+  ...
+# Subtest: each character resamples interval, stall never causes catch-up bulk input
+ok 198 - each character resamples interval, stall never causes catch-up bulk input
+  ---
+  duration_ms: 3.0744
+  type: 'test'
+  ...
+# Subtest: all documented effort levels normalize
+ok 199 - all documented effort levels normalize
+  ---
+  duration_ms: 15.4776
+  type: 'test'
+  ...
+# Subtest: flat keys, nested output config and stringValue wrappers
+ok 200 - flat keys, nested output config and stringValue wrappers
+  ---
+  duration_ms: 6.6387
+  type: 'test'
+  ...
+# Subtest: known JSON provider options decoded; arbitrary text ignored
+ok 201 - known JSON provider options decoded; arbitrary text ignored
+  ---
+  duration_ms: 3.861
+  type: 'test'
+  ...
+# Subtest: budget and mode stay separate from effort
+ok 202 - budget and mode stay separate from effort
+  ---
+  duration_ms: 4.7699
+  type: 'test'
+  ...
+# Subtest: summary handles conflict unsupported stale and missing
+ok 203 - summary handles conflict unsupported stale and missing
+  ---
+  duration_ms: 6.2737
+  type: 'test'
+  ...
+# Subtest: internal name suffix is not explicit effort
+ok 204 - internal name suffix is not explicit effort
+  ---
+  duration_ms: 2.6078
+  type: 'test'
+  ...
+# Subtest: reported reasoning usage positive zero unavailable and conflict
+ok 205 - reported reasoning usage positive zero unavailable and conflict
+  ---
+  duration_ms: 6.3482
+  type: 'test'
+  ...
+# Subtest: detail parser extracts settings and correlates latest same-call records
+ok 206 - detail parser extracts settings and correlates latest same-call records
+  ---
+  duration_ms: 15.7711
+  type: 'test'
+  ...
+# Subtest: ambiguous concurrent calls never produce a guessed tier
+ok 207 - ambiguous concurrent calls never produce a guessed tier
+  ---
+  duration_ms: 7.3526
+  type: 'test'
+  ...
+# Subtest: detail sanitizer drops secret payloads and invalid records
+ok 208 - detail sanitizer drops secret payloads and invalid records
+  ---
+  duration_ms: 6.92
+  type: 'test'
+  ...
+# Subtest: Trace parser accepts properties and flat configuration keys
+ok 209 - Trace parser accepts properties and flat configuration keys
+  ---
+  duration_ms: 2.7133
+  type: 'test'
+  ...
+# Subtest: automatic scope requires current session and exactly one authorized run
+ok 210 - automatic scope requires current session and exactly one authorized run
+  ---
+  duration_ms: 2.2496
+  type: 'test'
+  ...
+# Subtest: span reader stops on 429 without retry
+ok 211 - span reader stops on 429 without retry
+  ---
+  duration_ms: 6.5513
+  type: 'test'
+  ...
+# Subtest: automatic details do nothing when page context is stale
+ok 212 - automatic details do nothing when page context is stale
+  ---
+  duration_ms: 7.6996
+  type: 'test'
+  ...
+# Subtest: runmodel mocked end-to-end acquires same-run details and resets
+ok 213 - runmodel mocked end-to-end acquires same-run details and resets
+  ---
+  duration_ms: 542.8755
+  type: 'test'
+  ...
+# Subtest: HUD distinguishes explicit effort internal hint and zero usage while retaining controls
+ok 214 - HUD distinguishes explicit effort internal hint and zero usage while retaining controls
+  ---
+  duration_ms: 5.6413
+  type: 'test'
+  ...
+# Subtest: existing notification API and upgraded version remain present
+ok 215 - existing notification API and upgraded version remain present
+  ---
+  duration_ms: 0.9281
+  type: 'test'
+  ...
+# Subtest: exact Trigger.dev events URL and explicit switch in latest turn are required
+ok 216 - exact Trigger.dev events URL and explicit switch in latest turn are required
+  ---
+  duration_ms: 66.2696
+  type: 'test'
+  ...
+# Subtest: page polling yields an immediate scoped signal without an extra request or raw trace in the event
+ok 217 - page polling yields an immediate scoped signal without an extra request or raw trace in the event
+  ---
+  duration_ms: 36.0622
+  type: 'test'
+  ...
+# Subtest: stale phase, old turn, other run and navigation are rejected
+ok 218 - stale phase, old turn, other run and navigation are rejected
+  ---
+  duration_ms: 4.5214
+  type: 'test'
+  ...
+# Subtest: the existing authorized trace read emits a switch before any span-detail read
+ok 219 - the existing authorized trace read emits a switch before any span-detail read
+  ---
+  duration_ms: 9.2155
+  type: 'test'
+  ...
+# Subtest: active trace fallback retains its original eight-second initial wait
+ok 220 - active trace fallback retains its original eight-second initial wait
+  ---
+  duration_ms: 9.4357
+  type: 'test'
+  ...
+# Subtest: a late page response cannot cross to a new generation
+ok 221 - a late page response cannot cross to a new generation
+  ---
+  duration_ms: 7.9022
+  type: 'test'
+  ...
+# Subtest: same-turn confirmed switch uses the existing safe, once-per-generation stop action
+ok 222 - same-turn confirmed switch uses the existing safe, once-per-generation stop action
+  ---
+  duration_ms: 4.2965
+  type: 'test'
+  ...
+# Subtest: server USD fields retain precision
+ok 223 - server USD fields retain precision
+  ---
+  duration_ms: 2.5082
+  type: 'test'
+  ...
+# Subtest: no credits-to-USD conversion
+ok 224 - no credits-to-USD conversion
+  ---
+  duration_ms: 0.281
+  type: 'test'
+  ...
+# Subtest: missing snapshot remains unavailable
+ok 225 - missing snapshot remains unavailable
+  ---
+  duration_ms: 0.1283
+  type: 'test'
+  ...
+# Subtest: partial charge rejected
+ok 226 - partial charge rejected
+  ---
+  duration_ms: 0.2192
+  type: 'test'
+  ...
+# Subtest: latest turn without cost does not fall back
+ok 227 - latest turn without cost does not fall back
+  ---
+  duration_ms: 0.2469
+  type: 'test'
+  ...
+# Subtest: newest cost missing amount does not fall back
+ok 228 - newest cost missing amount does not fall back
+  ---
+  duration_ms: 3.7915
+  type: 'test'
+  ...
+# Subtest: zero allowance is not a missing value
+ok 229 - zero allowance is not a missing value
+  ---
+  duration_ms: 0.6972
+  type: 'test'
+  ...
+# Subtest: negative remaining balance supported
+ok 230 - negative remaining balance supported
+  ---
+  duration_ms: 0.2452
+  type: 'test'
+  ...
+# Subtest: nonfinite and string amounts rejected
+ok 231 - nonfinite and string amounts rejected
+  ---
+  duration_ms: 0.3286
+  type: 'test'
+  ...
+# Subtest: partial collection is not a settled balance
+ok 232 - partial collection is not a settled balance
+  ---
+  duration_ms: 0.3089
+  type: 'test'
+  ...
+# Subtest: successful bound auto snapshot
+ok 233 - successful bound auto snapshot
+  ---
+  duration_ms: 0.4417
+  type: 'test'
+  ...
+# Subtest: other page rejected
+ok 234 - other page rejected
+  ---
+  duration_ms: 0.2516
+  type: 'test'
+  ...
+# Subtest: other generation rejected
+ok 235 - other generation rejected
+  ---
+  duration_ms: 0.1229
+  type: 'test'
+  ...
+# Subtest: other run rejected
+ok 236 - other run rejected
+  ---
+  duration_ms: 0.1234
+  type: 'test'
+  ...
+# Subtest: turn baseline rejected
+ok 237 - turn baseline rejected
+  ---
+  duration_ms: 0.1195
+  type: 'test'
+  ...
+# Subtest: new trace turn invalidates old quota
+ok 238 - new trace turn invalidates old quota
+  ---
+  duration_ms: 0.1078
+  type: 'test'
+  ...
+# Subtest: desktop sanitized snapshot supported
+ok 239 - desktop sanitized snapshot supported
+  ---
+  duration_ms: 0.1118
+  type: 'test'
+  ...
+# Subtest: new missing snapshot supersedes old data
+ok 240 - new missing snapshot supersedes old data
+  ---
+  duration_ms: 0.1399
+  type: 'test'
+  ...
+# Subtest: no arbitrary secrets propagated
+ok 241 - no arbitrary secrets propagated
+  ---
+  duration_ms: 0.1614
+  type: 'test'
+  ...
+# Subtest: read time must be valid
+ok 242 - read time must be valid
+  ---
+  duration_ms: 0.085
+  type: 'test'
+  ...
+# Subtest: network failure is explicitly labelled
+ok 243 - network failure is explicitly labelled
+  ---
+  duration_ms: 2.3777
+  type: 'test'
+  ...
+# Subtest: adapter has no network or storage calls
+ok 244 - adapter has no network or storage calls
+  ---
+  duration_ms: 0.3073
+  type: 'test'
+  ...
+# Subtest: migrated core matches the upstream adapter after newline normalization
+ok 245 - migrated core matches the upstream adapter after newline normalization
+  ---
+  duration_ms: 0.6978
+  type: 'test'
+  ...
+# Subtest: cost parser and sanitizer retain all seven quota fields and reject unrelated payloads
+ok 246 - cost parser and sanitizer retain all seven quota fields and reject unrelated payloads
+  ---
+  duration_ms: 8.4678
+  type: 'test'
+  ...
+# Subtest: quota fields keep zero and signed balances, without accepting string numbers or secret labels
+ok 247 - quota fields keep zero and signed balances, without accepting string numbers or secret labels
+  ---
+  duration_ms: 1.8991
+  type: 'test'
+  ...
+# Subtest: automatic collection exposes USD using only its existing trace and span reads
+ok 248 - automatic collection exposes USD using only its existing trace and span reads
+  ---
+  duration_ms: 543.7501
+  type: 'test'
+  ...
+# Subtest: actual main boot installs the card and exposes sanitized desktop quota snapshots
+ok 249 - actual main boot installs the card and exposes sanitized desktop quota snapshots
+  ---
+  duration_ms: 5.5183
+  type: 'test'
+  ...
+# Subtest: desktop ingress and read API enforce page, run and generation boundaries
+ok 250 - desktop ingress and read API enforce page, run and generation boundaries
+  ---
+  duration_ms: 2.4344
+  type: 'test'
+  ...
+# Subtest: new missing desktop charge supersedes automatic quota from an older turn
+ok 251 - new missing desktop charge supersedes automatic quota from an older turn
+  ---
+  duration_ms: 3.3678
+  type: 'test'
+  ...
+# Subtest: card mounts in current HUD and renders USD amounts, precision and percentage
+ok 252 - card mounts in current HUD and renders USD amounts, precision and percentage
+  ---
+  duration_ms: 32.402
+  type: 'test'
+  ...
+# Subtest: legacy monitor takes priority by moving the same card without duplication
+ok 253 - legacy monitor takes priority by moving the same card without duplication
+  ---
+  duration_ms: 7.7168
+  type: 'test'
+  ...
+# Subtest: without MutationObserver, late mount and timer recovery still reuse the original card
+ok 254 - without MutationObserver, late mount and timer recovery still reuse the original card
+  ---
+  duration_ms: 3.0931
+  type: 'test'
+  ...
+# Subtest: repeat installation shares one timer and disposal is idempotent
+ok 255 - repeat installation shares one timer and disposal is idempotent
+  ---
+  duration_ms: 5.9729
+  type: 'test'
+  ...
+# Subtest: card retains last valid amounts and tooltips until another complete USD snapshot arrives
+ok 256 - card retains last valid amounts and tooltips until another complete USD snapshot arrives
+  ---
+  duration_ms: 5.3035
+  type: 'test'
+  ...
+# Subtest: without a prior valid snapshot the card remains empty until the first numeric update
+ok 257 - without a prior valid snapshot the card remains empty until the first numeric update
+  ---
+  duration_ms: 3.5743
+  type: 'test'
+  ...
+# Subtest: zero allowance stays zero, negative balance stays signed and the ring is clamped
+ok 258 - zero allowance stays zero, negative balance stays signed and the ring is clamped
+  ---
+  duration_ms: 4.0237
+  type: 'test'
+  ...
+# Subtest: unrepresentable percentage does not display Infinity or NaN
+ok 259 - unrepresentable percentage does not display Infinity or NaN
+  ---
+  duration_ms: 5.1454
+  type: 'test'
+  ...
+# Subtest: stale records and failed collection carry explicit warnings
+ok 260 - stale records and failed collection carry explicit warnings
+  ---
+  duration_ms: 3.2346
+  type: 'test'
+  ...
+# Subtest: a retained snapshot gains the stale warning once at the five-minute boundary
+ok 261 - a retained snapshot gains the stale warning once at the five-minute boundary
+  ---
+  duration_ms: 5.706
+  type: 'test'
+  ...
+# Subtest: server labels are text, never HTML
+ok 262 - server labels are text, never HTML
+  ---
+  duration_ms: 2.7269
+  type: 'test'
+  ...
+# Subtest: new-chat route and transient adapter failures retain old values; leaving Agent clears them
+ok 263 - new-chat route and transient adapter failures retain old values; leaving Agent clears them
+  ---
+  duration_ms: 4.1985
+  type: 'test'
+  ...
+# Subtest: off-origin and framed pages create no card or timer
+ok 264 - off-origin and framed pages create no card or timer
+  ---
+  duration_ms: 3.3371
+  type: 'test'
+  ...
+# Subtest: new feature registers passively and performs no network, persistence or business action
+ok 265 - new feature registers passively and performs no network, persistence or business action
+  ---
+  duration_ms: 10.1368
+  type: 'test'
+  ...
+# Subtest: identical ready snapshots cause no DOM writes across repeated refreshes
+ok 266 - identical ready snapshots cause no DOM writes across repeated refreshes
+  ---
+  duration_ms: 15.3062
+  type: 'test'
+  ...
+# Subtest: unchanged empty states also cause no repeated DOM writes
+ok 267 - unchanged empty states also cause no repeated DOM writes
+  ---
+  duration_ms: 6.4828
+  type: 'test'
+  ...
+# Subtest: content clobber restores the same populated card before the next interval
+ok 268 - content clobber restores the same populated card before the next interval
+  ---
+  duration_ms: 2.552
+  type: 'test'
+  ...
+# Subtest: replacing the complete HUD body retains the card and its child nodes
+ok 269 - replacing the complete HUD body retains the card and its child nodes
+  ---
+  duration_ms: 5.6998
+  type: 'test'
+  ...
+# Subtest: one hundred host redraws retain one card with no timer tick or observer loop
+ok 270 - one hundred host redraws retain one card with no timer tick or observer loop
+  ---
+  duration_ms: 67.4089
+  type: 'test'
+  ...
+# Subtest: own text updates do not trigger another render or observer feedback loop
+ok 271 - own text updates do not trigger another render or observer feedback loop
+  ---
+  duration_ms: 3.5202
+  type: 'test'
+  ...
+# Subtest: late host discovery and host replacement update observer bindings without waiting for the timer
+ok 272 - late host discovery and host replacement update observer bindings without waiting for the timer
+  ---
+  duration_ms: 3.0401
+  type: 'test'
+  ...
+# Subtest: observers are disconnected on disposal and queued callbacks cannot resurrect the card
+ok 273 - observers are disconnected on disposal and queued callbacks cannot resurrect the card
+  ---
+  duration_ms: 1.948
+  type: 'test'
+  ...
+# Subtest: reinjection replaces the previous disposable implementation rather than keeping its flicker
+ok 274 - reinjection replaces the previous disposable implementation rather than keeping its flicker
+  ---
+  duration_ms: 4.1167
+  type: 'test'
+  ...
+# Subtest: stale warning updates only once when the five-minute boundary is crossed
+ok 275 - stale warning updates only once when the five-minute boundary is crossed
+  ---
+  duration_ms: 4.5853
+  type: 'test'
+  ...
+# Subtest: initially unverified; legacy unscoped gacha snapshots are not resumed
+ok 276 - initially unverified; legacy unscoped gacha snapshots are not resumed
+  ---
+  duration_ms: 6.2031
+  type: 'test'
+  ...
+# Subtest: fresh identity is checked before and after quotas; only allowlisted cache fields published
+ok 277 - fresh identity is checked before and after quotas; only allowlisted cache fields published
+  ---
+  duration_ms: 3.2165
+  type: 'test'
+  ...
+# Subtest: zero balance and pulse are retained, not treated as missing
+ok 278 - zero balance and pulse are retained, not treated as missing
+  ---
+  duration_ms: 1.1871
+  type: 'test'
+  ...
+# Subtest: failed balance fetch is unavailable, not fabricated from cached data
+ok 279 - failed balance fetch is unavailable, not fabricated from cached data
+  ---
+  duration_ms: 6.6861
+  type: 'test'
+  ...
+# Subtest: account event stops automation, clears mirrors, blocks refresh until reload
+ok 280 - account event stops automation, clears mirrors, blocks refresh until reload
+  ---
+  duration_ms: 1.5041
+  type: 'test'
+  ...
+# Subtest: same-tab dirty marker detected synchronously before automation
+ok 281 - same-tab dirty marker detected synchronously before automation
+  ---
+  duration_ms: 1.0136
+  type: 'test'
+  ...
+# Subtest: existing dirty marker at startup is acknowledged without reload loop
+ok 282 - existing dirty marker at startup is acknowledged without reload loop
+  ---
+  duration_ms: 5.7834
+  type: 'test'
+  ...
+# Subtest: switcher click freezes first, preserving old mirrors for companion mirrorOut
+ok 283 - switcher click freezes first, preserving old mirrors for companion mirrorOut
+  ---
+  duration_ms: 1.0612
+  type: 'test'
+  ...
+# Subtest: identity changed between requests never publishes mixed-account results
+ok 284 - identity changed between requests never publishes mixed-account results
+  ---
+  duration_ms: 1.0235
+  type: 'test'
+  ...
+# Subtest: late response after account event cannot repopulate cleared mirrors
+ok 285 - late response after account event cannot repopulate cleared mirrors
+  ---
+  duration_ms: 2.0883
+  type: 'test'
+  ...
+# Subtest: anonymous session remains blocked
+ok 286 - anonymous session remains blocked
+  ---
+  duration_ms: 2.1453
+  type: 'test'
+  ...
+# Subtest: USD mirror uses fresh genuine quota snapshots, never credits conversion
+ok 287 - USD mirror uses fresh genuine quota snapshots, never credits conversion
+  ---
+  duration_ms: 2.418
+  type: 'test'
+  ...
+# Subtest: generated balance exception only permits same-origin Arena; other blockers remain
+ok 288 - generated balance exception only permits same-origin Arena; other blockers remain
+  ---
+  duration_ms: 8.0622
+  type: 'test'
+  ...
+# Subtest: compatibility never uses cookie/password APIs or replaces Account Switch
+ok 289 - compatibility never uses cookie/password APIs or replaces Account Switch
+  ---
+  duration_ms: 7.6724
+  type: 'test'
+  ...
+# Subtest: keyboard confirmation freezes before companion changes cookies
+ok 290 - keyboard confirmation freezes before companion changes cookies
+  ---
+  duration_ms: 1.1568
+  type: 'test'
+  ...
+# Subtest: failed identity verification removes stale account mirrors
+ok 291 - failed identity verification removes stale account mirrors
+  ---
+  duration_ms: 0.9304
+  type: 'test'
+  ...
+# Subtest: primary hit renames current conversation
+ok 292 - primary hit renames current conversation
+  ---
+  duration_ms: 3.178
+  type: 'test'
+  ...
+# Subtest: secondary hit renames current conversation
+ok 293 - secondary hit renames current conversation
+  ---
+  duration_ms: 4.1652
+  type: 'test'
+  ...
+# Subtest: duplicate polls and reloads do not rename or increment again
+ok 294 - duplicate polls and reloads do not rename or increment again
+  ---
+  duration_ms: 1.9579
+  type: 'test'
+  ...
+# Subtest: sequence persists per model, across conversations
+ok 295 - sequence persists per model, across conversations
+  ---
+  duration_ms: 6.1684
+  type: 'test'
+  ...
+# Subtest: route change during rename cannot save on new conversation
+ok 296 - route change during rename cannot save on new conversation
+  ---
+  duration_ms: 1.0573
+  type: 'test'
+  ...
+# Subtest: non-target or stale URL is ignored
+ok 297 - non-target or stale URL is ignored
+  ---
+  duration_ms: 0.8129
+  type: 'test'
+  ...
+# Subtest: storage failure prevents UI changes and releases runner lock
+ok 298 - storage failure prevents UI changes and releases runner lock
+  ---
+  duration_ms: 0.8994
+  type: 'test'
+  ...
+# Subtest: UI failure is reported and not retried every poll
+ok 299 - UI failure is reported and not retried every poll
+  ---
+  duration_ms: 2.6882
+  type: 'test'
+  ...
+# Subtest: candidate hook pauses runner before existing-dialog handling
+ok 300 - candidate hook pauses runner before existing-dialog handling
+  ---
+  duration_ms: 11.0189
+  type: 'test'
+  ...
+# Subtest: generated runner integrates rename hold for astra-opus
+ok 301 - generated runner integrates rename hold for astra-opus
+  ---
+  duration_ms: 34.872
+  type: 'test'
+  ...
+# Subtest: generated runner integrates rename hold for gemini-2.5-pro
+ok 302 - generated runner integrates rename hold for gemini-2.5-pro
+  ---
+  duration_ms: 10.6103
+  type: 'test'
+  ...
+# Subtest: same model numbering is independent for each verified account
+ok 303 - same model numbering is independent for each verified account
+  ---
+  duration_ms: 3.8819
+  type: 'test'
+  ...
+# Subtest: account switch on unchanged URL cancels pending rename
+ok 304 - account switch on unchanged URL cancels pending rename
+  ---
+  duration_ms: 1.1288
+  type: 'test'
+  ...
+# Subtest: unknown account cannot begin a rename or consume a number
+ok 305 - unknown account cannot begin a rename or consume a number
+  ---
+  duration_ms: 0.7874
+  type: 'test'
+  ...
+# Subtest: generated metadata selects intended hosts, page context and document-start
+ok 306 - generated metadata selects intended hosts, page context and document-start
+  ---
+  duration_ms: 14.5162
+  type: 'test'
+  ...
+# Subtest: all eight modules register without external code execution
+ok 307 - all eight modules register without external code execution
+  ---
+  duration_ms: 22.0789
+  type: 'test'
+  ...
+# Subtest: repeated injection does not re-register modules or DOM listeners
+ok 308 - repeated injection does not re-register modules or DOM listeners
+  ---
+  duration_ms: 5.8012
+  type: 'test'
+  ...
+# Subtest: foreign hosts and frames remain untouched
+ok 309 - foreign hosts and frames remain untouched
+  ---
+  duration_ms: 5.2061
+  type: 'test'
+  ...
+# Subtest: mailbox host loads auth only; no probe, recovery or billing interception
+ok 310 - mailbox host loads auth only; no probe, recovery or billing interception
+  ---
+  duration_ms: 2.8281
+  type: 'test'
+  ...
+# Subtest: billing adapter is unavailable before account verification
+ok 311 - billing adapter is unavailable before account verification
+  ---
+  duration_ms: 3.1838
+  type: 'test'
+  ...
+# Subtest: external broadcasts require explicit opt-in, and can be disabled again
+ok 312 - external broadcasts require explicit opt-in, and can be disabled again
+  ---
+  duration_ms: 10.4024
+  type: 'test'
+  ...
+# Subtest: Markdown renderer stays callable as an expression result
+ok 313 - Markdown renderer stays callable as an expression result
+  ---
+  duration_ms: 3.3722
+  type: 'test'
+  ...
+# Subtest: provenance verifies original assets and generated output
+ok 314 - provenance verifies original assets and generated output
+  ---
+  duration_ms: 15.2478
+  type: 'test'
+  ...
+# Subtest: adapter mounts once, starts collapsed, and does not perform page actions
+ok 315 - adapter mounts once, starts collapsed, and does not perform page actions
+  ---
+  duration_ms: 6.512
+  type: 'test'
+  ...
+# Subtest: export and repair UI require explicit clicks; cancelled confirmation prevents mutation
+ok 316 - export and repair UI require explicit clicks; cancelled confirmation prevents mutation
+  ---
+  duration_ms: 2.4681
+  type: 'test'
+  ...
+# Subtest: mailbox adapter omits Arena-only operations
+ok 317 - mailbox adapter omits Arena-only operations
+  ---
+  duration_ms: 1.4533
+  type: 'test'
+  ...
+1..317
+# tests 317
+# suites 0
+# pass 317
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7867.5418

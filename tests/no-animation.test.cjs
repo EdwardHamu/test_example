@@ -55,5 +55,5 @@ test('missing refresh callback is harmless and pulse updates remain immediate',a
   const w=widget(null);await w.click();assert.equal(w.attributes.size,0);
   w.w.update({pulse:25});
   assert.equal(w.w.valEl.textContent,'25%');assert.equal(w.w.barEl.style.width,'25%');
-  assert.equal(w.w.barEl.style.backgroundColor,'#f59e0b');
+  assert.equal(w.w.barEl.style.backgroundColor,'#ffcf70');
 });
