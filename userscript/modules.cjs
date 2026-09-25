@@ -1,0 +1,65 @@
+'use strict';
+// Source locations; startup order and API wiring live in main.js.
+module.exports=[
+ ['COMPOSERESC','tools/userscript-composer-auto-esc.js','expression'],
+  ['COMPOSER', 'tools/userscript-composer-visibility.js', 'expression'],
+  ['REVIEW', 'tools/userscript-task-review-hider.js', 'expression'],
+  [
+    "AUTH",
+    "assets/AuthBridge.js"
+  ],
+  [
+    "ACCOUNTS",
+    "tools/userscript-account-compat.js",
+    "expression"
+  ],
+  [
+    "PAGE",
+    "assets/PageBridge.js"
+  ],
+  [
+    "CANDIDATE",
+    "assets/CandidateBridge.js",
+    "raw",
+    "candidate"
+  ],
+  [
+    "RECOVERY",
+    "assets/ConversationRecovery.js"
+  ],
+  [
+    "FOLLOW",
+    "assets/FollowLatest.js"
+  ],
+  [
+    "MARKDOWN",
+    "assets/ConversationMarkdown.js",
+    "expression"
+  ],
+  [
+    "BALANCE",
+    "assets/ArenaBalance.js",
+    "expression"
+  ],
+  [
+    "PROBE",
+    "assets/arena-model-probe.inject.js",
+    "raw",
+    "probe"
+  ],
+  [
+    "MODELS",
+    "tools/userscript-session-models.js",
+    "expression"
+  ],
+  [
+    "USAGE",
+    "tools/userscript-session-usage.js",
+    "expression"
+  ],
+  [
+    "ADAPTER",
+    "tools/userscript-adapter.js",
+    "expression"
+  ]
+];

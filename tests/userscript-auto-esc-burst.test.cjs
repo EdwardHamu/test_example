@@ -1,0 +1,18 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const src=fs.readFileSync(path.join(__dirname,'../tools/userscript-composer-auto-esc.js'),'utf8');
+function setup(initial=true){let exists=initial,now=0,id=0,enabled=true,epoch=0,reload=false,listener;const timers=new Map(),calls=[];
+ const editor={getClientRects:()=>[{}]},root={closest:()=>null,querySelector:()=>editor,querySelectorAll:()=>[editor],getClientRects:()=>[{}]};
+ const location={hostname:'arena.ai',origin:'https://arena.ai',pathname:'/agent/11111111-1111-1111-1111-111111111111'};
+ const probe={bus:{generation:0},isAutoEscEnabled:()=>enabled,triggerEsc:()=>{calls.push(now);return true;}};
+ const api={accounts:{epoch:()=>epoch,requiresReload:()=>reload,canOperate:()=>false}};
+ vm.runInNewContext(src,{location,window:{__MODEL_PROBE__:probe,addEventListener(){}},document:{documentElement:{},querySelectorAll:()=>exists?[root]:[],addEventListener(){}},getComputedStyle:()=>({visibility:'visible'}),MutationObserver:class{constructor(f){listener=f;}observe(){}disconnect(){}},setInterval:()=>1,clearInterval(){},setTimeout:(fn,ms)=>{timers.set(++id,{fn,at:now+ms});return id;},clearTimeout:id=>timers.delete(id)})(api);
+ function tick(ms){const end=now+ms;while(true){const e=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];if(!e||e[1].at>end)break;now=e[1].at;timers.delete(e[0]);e[1].fn();}now=end;}
+ return {api,probe,location,calls,timers,tick,scan:()=>api.composerAutoEsc.scan(),show(v){exists=v;listener();},disable(){enabled=false;},switchAccount(){epoch++;},reload(){reload=true;}};
+}
+test('composer disappearance triggers at 0.5s, 1s, 1.5s even generation zero and account unverified',()=>{const e=setup();e.show(false);e.tick(499);assert.deepEqual(e.calls,[]);e.tick(1);assert.deepEqual(e.calls,[500]);e.tick(1000);assert.deepEqual(e.calls,[500,1000,1500]);assert.equal(e.api.composerAutoEsc.status().phase,'completed');});
+test('initial absence does not send Escape, nor repeated mutations after a burst',()=>{const e=setup(false);e.scan();e.tick(5000);assert.equal(e.calls.length,0);e.show(true);e.show(false);e.tick(2000);e.scan();e.show(false);e.tick(5000);assert.equal(e.calls.length,3);});
+test('transient unmount and composer restoration cancel pending Escape',()=>{const e=setup();e.show(false);e.tick(250);e.show(true);e.tick(5000);assert.equal(e.calls.length,0);e.show(false);e.tick(500);e.show(true);e.tick(3000);assert.equal(e.calls.length,1);});
+test('route change, new turn, disabled switch and account change cancel safely',()=>{for(const action of [e=>e.location.pathname='/agent/22222222-2222-2222-2222-222222222222',e=>e.probe.bus.generation++,e=>e.disable(),e=>e.switchAccount(),e=>e.reload()]){const e=setup();e.show(false);action(e);e.tick(5000);assert.equal(e.calls.length,0);}});
+test('a subsequent disappearance arms a fresh sequence',()=>{const e=setup();e.show(false);e.tick(2000);e.show(true);e.show(false);e.tick(2000);assert.deepEqual(e.calls,[500,1000,1500,2500,3000,3500]);});
+test('teardown clears pending tasks',()=>{const e=setup();e.show(false);e.api.composerAutoEsc.stop();e.tick(5000);assert.equal(e.calls.length,0);assert.equal(e.timers.size,0);});
+test('built script removes old completion burst but preserves manual Escape',()=>{const built=fs.readFileSync(path.join(__dirname,'../userscript-build/user.candidate.js'),'utf8');assert.doesNotMatch(built,/AUTO_ESC_BURST_BEGIN/);assert.match(built,/Auto Escape is driven by composer disappearance/);assert.match(built,/if \(act === 'test-esc'\) \{[\s\S]*?const ok = notifier.triggerEscapeKey\(\);/);});

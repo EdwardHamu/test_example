@@ -12,10 +12,8 @@
     try{window.__AMP_PAGE_GACHA__?.stop?.();}catch{}
     // The old snapshot has no account binding. Never resume it after changing credentials.
     remove('amp_page_gacha_session');
-    api.broadcastEnabled=false;
-    // Disable the optional idle follow, not view-only following of a response being generated.
-    // An unavailable /api/me must never permanently break conversation scrolling.
-    try{window.__arenaFollowLatest?.setEnabled?.(false);}catch{}
+    // View-only forced scrolling is controlled solely by its own switch.
+
   }
   function invalidate(why,preserveMirrors=false){
     if(reloadRequired){if(!preserveMirrors)for(const k of MIRRORS)remove(k);return;}

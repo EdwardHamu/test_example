@@ -5768,9 +5768,24 @@ __mods["notifier"] = { fn: function (exp) {
       ...extra,
     });
   }
+  /** A pending interactive choice: only route metadata, never question/option text. */
+  function broadcastChoice() {
+    const id = typeof location !== 'undefined' && location.origin === 'https://arena.ai'
+      ? /^\/agent\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+        .exec(location.pathname || '')?.[1].toLowerCase() : null;
+    if (!id) return Promise.resolve(false);
+    return broadcast({
+      title: 'Arena 交互式选项待处理',
+      content: '当前会话出现待选择的交互式选项，请返回页面处理。',
+      level: 'warning', source: 'arena-model-probe', event: 'interactive-choice',
+      sessionId: id, url: location.origin + location.pathname,
+      at: new Date().toISOString(),
+    });
+  }
   exp.broadcast = broadcast;
   exp.broadcastHit = broadcastHit;
   exp.broadcastStop = broadcastStop;
+  exp.broadcastChoice = broadcastChoice;
 } };
 __mods["captcha-alert"] = { fn: function (exp) {
   // Inspect only visible UI, never conversation text or cross-origin frame contents.
@@ -5918,7 +5933,7 @@ __mods["choice-alert"] = { fn: function (exp) {
       osc.onended = close; osc.start(t); osc.stop(t + 1.02);
     } catch { close(); }
   }
-  function start({enabled = () => true, detect = findPendingMessages, sound = playChoice} = {}) {
+  function start({enabled = () => true, detect = findPendingMessages, sound = playChoice, onAppear = null} = {}) {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null;
     const key = '__AMP_CHOICE_WATCHER__';
     window[key]?.stop?.();
@@ -5940,14 +5955,18 @@ __mods["choice-alert"] = { fn: function (exp) {
         for (const [identity, state] of states) {
           if (!present.has(identity) && ++state.misses >= 2) states.delete(identity);
         }
-        let announce = false;
+        let announce = false, sendNotice = false;
+        let soundEnabled = false;
+        try { soundEnabled = !!enabled(); } catch { /* Server notice is independent of local audio settings. */ }
         for (const identity of present) {
           let state = states.get(identity);
-          if (!state) { state = {announced: false, misses: 0}; states.set(identity, state); }
+          if (!state) { state = {announced: false, notified: false, misses: 0}; states.set(identity, state); }
           state.misses = 0;
-          if (!state.announced && enabled()) { state.announced = true; announce = true; }
+          if (!state.notified && typeof onAppear === 'function') { state.notified = true; sendNotice = true; }
+          if (!state.announced && soundEnabled) { state.announced = true; announce = true; }
         }
         // Several choice cards arriving together share one sound, not a chorus.
+        if (sendNotice) { try { Promise.resolve(onAppear()).catch(() => {}); } catch {} }
         if (announce) Promise.resolve(sound()).catch(() => {});
       } catch { /* UI/audio errors must not interrupt the host page. */ }
     }

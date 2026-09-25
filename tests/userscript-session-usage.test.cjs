@@ -36,49 +36,49 @@ test('new snapshot may complete a partial turn but may not erase complete metric
 test('malformed local records are discarded; extra raw fields are never re-persisted',()=>{const {u}=setup();const r=row(u,detail([usage(),cost()]));r.secret='should-not-survive';const m=u.merge({records:{bad:{key:'bad'},good:r}},[]);assert.equal(u.summarize(m).turns,1);assert.equal(JSON.stringify(m).includes('should-not-survive'),false);});
 test('storage is retried after temporary failure without needing another trace',()=>{const options={failStorage:true},e=setup(options);install(e,detail([usage(),cost()]));assert.equal(e.u.snapshot().storageFailed,true);options.failStorage=false;assert.equal(e.u.snapshot().storageFailed,false);assert.equal(e.storage.size,1);});
 test('cache writes are displayed separately, not added to total tokens',()=>{const {u}=setup();const a=row(u,detail([span('usage',{inputTokens:10,outputTokens:2,cacheWriteTokens:7}),cost()]));assert.equal(a.metrics.cachedWrite.value,7);assert.equal(a.metrics.total.value,12);});
-test('DOM controls collapse and drag with bounds and save the position',()=>{const e=setup({dom:true}),h=e.elements.find(x=>x.tagName==='header'),body=e.elements.find(x=>x.tagName==='section'),host=e.elements.find(x=>x.id==='arena-session-usage');const fold=e.elements.find(x=>x.title==='折叠/展开');fold.onclick();assert.equal(body.hidden,true);fold.onclick();assert.equal(body.hidden,false);h.onpointerdown({target:h,button:0,clientX:10,clientY:90,pointerId:1,preventDefault(){}});h.onpointermove({clientX:9000,clientY:9000});assert.equal(host.style.left,'696px');assert.equal(host.style.top,'740px');h.onpointerup({pointerId:1});assert.ok(e.storage.has('arena-userscript-usage-position'));});
+test('DOM controls collapse and drag with bounds and save the position',()=>{const e=setup({dom:true}),h=e.elements.find(x=>x.tagName==='header'),body=e.elements.find(x=>x.tagName==='section'),host=e.elements.find(x=>x.id==='arena-session-usage');const fold=e.elements.find(x=>x.title==='折叠/展开');assert.equal(body.hidden,true);assert.equal(fold.textContent,'+');fold.onclick();assert.equal(body.hidden,false);assert.equal(fold.textContent,'−');fold.onclick();assert.equal(body.hidden,true);h.onpointerdown({target:h,button:0,clientX:10,clientY:90,pointerId:1,preventDefault(){}});h.onpointermove({clientX:9000,clientY:9000});assert.equal(host.style.left,'696px');assert.equal(host.style.top,'740px');h.onpointerup({pointerId:1});assert.ok(e.storage.has('arena-userscript-usage-position'));});
 
 
-test('collapsed float keeps the current-session cumulative input visible and refreshes without expanding',()=>{
+test('collapsed float shows current-turn input in k and refreshes without expanding',()=>{
  const e=setup({dom:true}),body=e.elements.find(x=>x.tagName==='section'),fold=e.elements.find(x=>x.title==='折叠/展开');
  const badge=e.elements.find(x=>x.className==='compact-input');
  assert.ok(badge,'a compact input label should be mounted in the header');
- assert.equal(badge.hidden,true,'expanded mode retains its original body layout');
- fold.onclick();
+ assert.equal(badge.hidden,false,'compact mode is the initial default');
+ assert.equal(fold.textContent,'+');
  assert.equal(body.hidden,true);assert.equal(badge.hidden,false);
- assert.equal(badge.textContent,'输入 Token —','unknown cumulative usage must not become a fabricated zero');
+ assert.equal(badge.textContent,'本轮输入 —','unknown current usage must not become a fabricated zero');
  e.setRun({runId:'run_a',tokenUrl:url,usage:{input:900,output:1,total:901}});
  e.tick();
  assert.equal(e.u.snapshot().latest.input,900);
- assert.equal(badge.textContent,'输入 Token —','latest response is a reference, not a cumulative session input');
+ assert.equal(badge.textContent,'本轮输入 0.9k','current-run reference is displayed without adding it to session totals');
  install(e,detail([usage(),cost()]));
  e.tick();
  assert.equal(body.hidden,true);
- assert.equal(badge.textContent,'输入 Token 100');
+ assert.equal(badge.textContent,'本轮输入 0.1k');
  fold.onclick();
  assert.equal(body.hidden,false);assert.equal(badge.hidden,true);
  assert.equal(e.u.snapshot().metrics.input.value,100);
 });
 
 test('collapsed input preserves incomplete and zero values but never leaks between accounts or conversations',()=>{
- const e=setup({dom:true}),fold=e.elements.find(x=>x.title==='折叠/展开');fold.onclick();
+ const e=setup({dom:true});
  const badge=e.elements.find(x=>x.className==='compact-input');
  install(e,detail([usage()]));
  e.tick();
- assert.equal(badge.textContent,'输入 Token 100 *','same incomplete/known-subtotal marker as the expanded input row');
- e.setScope('b');e.tick();assert.equal(badge.textContent,'输入 Token —');
+ assert.equal(badge.textContent,'本轮输入 0.1k *','incomplete current turn remains marked');
+ e.setScope('b');e.tick();assert.equal(badge.textContent,'本轮输入 —');
  e.setScope('a');e.loc.pathname='/agent/22222222-2222-2222-2222-222222222222';e.tick();
- assert.equal(badge.textContent,'输入 Token —');
- e.loc.pathname=new URL(url).pathname;e.tick();assert.equal(badge.textContent,'输入 Token 100 *');
- e.setScope(null);e.tick();assert.equal(badge.textContent,'输入 Token —','unverified account hides prior input');
- const zero=setup({dom:true});zero.elements.find(x=>x.title==='折叠/展开').onclick();
+ assert.equal(badge.textContent,'本轮输入 —');
+ e.loc.pathname=new URL(url).pathname;e.tick();assert.equal(badge.textContent,'本轮输入 0.1k *');
+ e.setScope(null);e.tick();assert.equal(badge.textContent,'本轮输入 —','unverified account hides prior input');
+ const zero=setup({dom:true});
  install(zero,detail([span('usage',{inputTokens:0,outputTokens:0}),span('cost',{chargedUsd:0,costUsd:0})]));
- zero.tick();assert.equal(zero.elements.find(x=>x.className==='compact-input').textContent,'输入 Token 0');
+ zero.tick();assert.equal(zero.elements.find(x=>x.className==='compact-input').textContent,'本轮输入 0k');
 });
 
 
 test("a prior account's run cannot be reattributed as usage or latest reference after scope changes",()=>{
- const e=setup({dom:true});e.elements.find(x=>x.title==='折叠/展开').onclick();
+ const e=setup({dom:true});
  const badge=e.elements.find(x=>x.className==='compact-input');
  e.setRun({runId:'old_run',tokenUrl:url,usage:{input:555},automaticTrace:{url,runId:'old_run',generation:1,detail:detail([usage(),cost()])}});
  assert.equal(e.u.snapshot().metrics.input.value,100);
@@ -86,9 +86,36 @@ test("a prior account's run cannot be reattributed as usage or latest reference 
  const other=e.u.snapshot();
  assert.equal(other.latest,null);
  assert.equal(other.metrics.input.value,null);
- assert.equal(badge.textContent,'输入 Token —');
+ assert.equal(badge.textContent,'本轮输入 —');
  e.setRun({runId:'new_run',tokenUrl:url,automaticTrace:{url,runId:'new_run',generation:1,detail:detail([span('usage',{inputTokens:7,outputTokens:2,totalTokens:9}),cost()])}});
  assert.equal(e.u.snapshot().metrics.input.value,7,'a genuinely new run belongs to the new account');
  e.setScope('a');
  assert.equal(e.u.snapshot().metrics.input.value,100,'the former account keeps only its own stored trace');
+});
+
+test('compact uses highest current trace turn, not session sum, and clears on new run',()=>{
+ const e=setup({dom:true});const badge=e.elements.find(x=>x.className==='compact-input');
+ install(e,detail([usage(),cost(),span('usage',{inputTokens:12345,outputTokens:1},{turn:2,spanId:'u2'}),span('cost',{chargedUsd:0,costUsd:0},{turn:2,spanId:'c2'})]));e.tick();
+ assert.equal(badge.textContent,'本轮输入 12.345k');assert.equal(e.u.snapshot().metrics.input.value,12445);
+ assert.equal(e.u.snapshot().currentTurn.turn,2);
+ e.setRun({runId:'run_new',tokenUrl:url});e.tick();assert.equal(badge.textContent,'本轮输入 —');assert.equal(e.u.snapshot().metrics.input.value,12445);
+});
+test('latest incomplete turn never falls back to earlier input or raw counters',()=>{
+ const e=setup({dom:true});
+ e.setRun({runId:'run_a',tokenUrl:url,usage:{input:999},automaticTrace:{url,runId:'run_a',generation:1,detail:detail([usage(),cost(),span('stream',{inputTokens:555},{turn:2,partial:true,spanId:'s2'})])}});e.tick();
+ assert.equal(e.elements.find(x=>x.className==='compact-input').textContent,'本轮输入 —');
+});
+test('k formatter preserves zero, single tokens and decimal thousands',()=>{
+ const e=setup({dom:true});const badge=e.elements.find(x=>x.className==='compact-input');
+ for(const [input,label] of [[0,'0k'],[1,'0.001k'],[1000,'1k'],[1200,'1.2k'],[1000000,'1000k']]){e.setRun({runId:'run_a',tokenUrl:url,usage:{input}});e.tick();assert.equal(badge.textContent,'本轮输入 '+label);}
+});
+test('stored session history alone never becomes current-round input after reload',()=>{
+ const e=setup();install(e,detail([usage(),cost()]));e.u.snapshot();const fresh=setup({dom:true,storage:e.storage});assert.equal(fresh.u.snapshot().metrics.input.value,100);assert.equal(fresh.elements.find(x=>x.className==='compact-input').textContent,'本轮输入 —');
+});
+test('fresh page always starts folded while hide/show preserves current in-page expansion',()=>{
+ const e=setup({dom:true}),body=e.elements.find(x=>x.tagName==='section'),badge=e.elements.find(x=>x.className==='compact-input'),fold=e.elements.find(x=>x.title==='折叠/展开');
+ assert.equal(body.hidden,true);assert.equal(badge.hidden,false);assert.equal(fold.textContent,'+');
+ e.u.hide();e.u.show();assert.equal(body.hidden,true);
+ fold.onclick();assert.equal(body.hidden,false);e.u.hide();e.u.show();assert.equal(body.hidden,false);
+ const fresh=setup({dom:true,storage:e.storage});assert.equal(fresh.elements.find(x=>x.tagName==='section').hidden,true);assert.equal(fresh.elements.find(x=>x.title==='折叠/展开').textContent,'+');
 });

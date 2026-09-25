@@ -1,0 +1,14 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../tools/userscript-composer-visibility.js'),'utf8');
+function root(valid=true,chat=false){const values={},priorities={};let writes=0;return {
+ closest:()=>chat?{}:null,querySelector:()=>valid?{}:null,
+ style:{getPropertyValue:k=>values[k],getPropertyPriority:k=>priorities[k],setProperty(k,v,p){values[k]=v;priorities[k]=p;writes++;}},get writes(){return writes;}};}
+function harness(roots=[],host='arena.ai',ready=true){const api={},queue=[],listeners={};let cb,observes=0;
+ const document={documentElement:ready?{}:null,querySelectorAll:()=>roots,addEventListener:(n,f)=>listeners[n]=f};
+ const install=vm.runInNewContext(source,{document,location:{hostname:host},setTimeout:f=>queue.push(f),MutationObserver:class{constructor(f){cb=f;}observe(){observes++;}}});
+ install(api);return {api,install,roots,document,listeners,queue,change:()=>cb(),flush:()=>{while(queue.length)queue.shift()();},get observes(){return observes;}};}
+test('entire composer wrapper receives visible CSS without a z-index override, idempotently',()=>{const r=root(),h=harness([r]);for(const [k,v] of Object.entries({display:'block',visibility:'visible',opacity:'1',position:'relative'})){assert.equal(r.style.getPropertyValue(k),v);assert.equal(r.style.getPropertyPriority(k),'important');}h.api.composerVisibility.scan();assert.equal(r.writes,4);h.install(h.api);assert.equal(h.observes,1);});
+test('missing composer, unrelated dropzone, transcript and mailbox are untouched',()=>{for(const r of [root(false),root(true,true)]){harness([r]);assert.equal(r.writes,0);}const r=root();harness([r],'10minutemail.one');assert.equal(r.writes,0);assert.doesNotThrow(()=>harness());});
+test('rerender and overwritten styles are handled, mutation bursts coalesce',()=>{const h=harness(),r=root();h.roots.push(r);h.change();h.change();assert.equal(h.queue.length,1);h.flush();assert.equal(r.writes,4);r.style.setProperty('display','none','important');h.change();h.flush();assert.equal(r.style.getPropertyValue('display'),'block');});
+test('document-start waits for root without creating or cloning composer',()=>{const r=root(),h=harness([r],'arena.ai',false);assert.equal(r.writes,0);h.document.documentElement={};h.listeners.DOMContentLoaded();assert.equal(r.writes,4);});
+test('composer visibility leaves website z-index unchanged',()=>{const r=root();r.style.setProperty('z-index','12','');const h=harness([r]);h.change();h.flush();assert.equal(r.style.getPropertyValue('z-index'),'12');assert.equal(r.style.getPropertyPriority('z-index'),'');const fresh=root();harness([fresh]);assert.equal(fresh.style.getPropertyValue('z-index'),undefined);});

@@ -42,7 +42,7 @@
       const tools=check('Markdown 包含工具记录',true,()=>{});
       button('导出 Markdown',()=>{const r=api.markdown.render(api.markdown.capture(),{reasoning:reasoning.checked,tools:tools.checked});download(r.filename,r.markdown,'text/markdown;charset=utf-8');return {stats:r.stats,warnings:r.warnings};});
       button('下载会话备份',()=>{download('arena-conversation.json',JSON.stringify(api.markdown.capture(),null,2),'application/json');return '已请求下载；正文可能含隐私，请勿直接公开。';});
-      check('结束后也跟随最新消息（运行时自动置底）',window.__arenaFollowLatest?.enabled,on=>{window.__arenaFollowLatestWanted=on;return window.__arenaFollowLatest.setEnabled(on);});
+      check('生成时强制保持底部（完成后停止，上滚不暂停）',window.__arenaFollowLatest?.enabled,on=>{window.__arenaFollowLatestWanted=on;return window.__arenaFollowLatest.setEnabled(on);});
       let plan=null;
       button('1. 检查修复并备份',()=>{plan=window.__arenaConversationRecovery.prepare();apply.disabled=!plan.eligible;if(plan.eligible){download('arena-recovery-backup.json',JSON.stringify(plan.backup,null,2),'application/json');return '已请求下载修复备份。确认文件已保存后，再点击应用；仅处理已验证的孤立末尾消息。';}return '未检测到可安全修复的孤立节点，不做修改。';});
       const apply=button('2. 确认备份后应用修复',()=>{if(!plan?.eligible)return;if(!confirm('确认备份文件已保存？将移除经验证的孤立末尾消息；这不是服务端数据修复。'))return;const r=window.__arenaConversationRecovery.apply(plan.token);apply.disabled=true;return r;});apply.disabled=true;
@@ -56,23 +56,16 @@
       button('开/关系统通知',()=>call('setNotificationEnabled',!call('isNotificationEnabled')));
       button('开/关自动 Esc',()=>call('setAutoEscEnabled',!call('isAutoEscEnabled')));
       button('开/关模型漂移停止',()=>call('setModelDriftStopEnabled',!call('isModelDriftStopEnabled')));
-      check('允许外部广播（本次页面有效）',false,on=>{
-        if(on&&!confirm('广播将把模型名、轮次、会话 URL 及停止原因等通知发送至 https://meamoe.top/koa/notify2。对端可能向其他客户端广播。确认允许？')){broadcastToggleReset();return false;}
-        api.broadcastEnabled=on;return on?'已允许本页外部广播；不代表服务器确认送达。':'外部广播已关闭';
-      });
-      function broadcastToggleReset(){for(const l of panel.querySelectorAll('label'))if(l.textContent.includes('允许外部广播'))l.querySelector('input').checked=false;}
+      el('p','外部通知广播默认开启：命中、意外停止及交互式选项会向公开的 meamoe.top/koa/notify2 发送事件、会话 URL 等必要信息；服务器可能转发至其他客户端或 Telegram。选项通知不发送问题/选项正文。');
+      el('h3','会话模型同步');
+      el('p','请同时安装“会话模型跨域助手”脚本。主脚本负责识别模型；独立助手仅向公开的 meamoe.top 会话模型接口发送会话 ID 和模型名，查询后只替换侧栏标题的显示文字，不重命名 Arena 会话。未装助手不影响模型识别与抽卡。');
+      button('会话模型同步状态',()=>api.sessionModels?.status()||{state:'未加载'});
       el('h3','候选操作');
       el('p','页面按钮由原 CandidateBridge 检查唯一性；不会自动点击发送或删除。');
       button('候选状态',()=>candidate('state'));
-      button('自动命名状态',()=>api.hitRename?.status()||{state:'未加载'});
-      button('重试失败命名',async()=>{if(!confirm('仅重试当前页面上次失败的自动命名，沿用原序号。请先关闭手动打开的菜单或对话框。继续？'))return '已取消';if(!api.hitRename?.retry())return '无法重试：没有本页失败记录、任务仍在运行，或账号/会话已改变。';await api.hitRename.settled();return api.hitRename.status();});
       button('打开 HTML 结果',()=>candidate('openHtmlArtifact'));
       for(const name of ['Raw source','Preview','Download file','Expand panel'])button(name,()=>candidate('button',name));
       const filename=input('text','准确的 HTML 文件名');button('打开指定文件',()=>candidate('file',filename.value));
-      button('打开重命名菜单',()=>candidate('renameMenuClick'));
-      button('选择 Rename',()=>candidate('button','Rename'));
-      const title=input('text','新对话名称（不超过 100 字）');button('填入名称',()=>candidate('renameFill',title.value));
-      button('确认重命名',()=>candidate('renameSave'));button('取消重命名',()=>candidate('renameCancel'));
       el('h3','浏览器本地图集');
       el('p','手动选择图片，仅保存在本页内存；刷新后清空。不具备桌面截图/目录扫描权限。');
       const picker=input('file','');picker.multiple=true;picker.accept='image/png,image/jpeg,image/webp,image/gif';
@@ -89,7 +82,7 @@
     const labels={expand:'展开侧栏',openLogin:'打开登录',email:'填入邮箱',submitEmail:'继续邮箱登录',name:'填入名称',create:'确认创建账号',password:'填入密码',submitPassword:'提交密码',openMail:'打开确认邮件',refreshMail:'申请更换邮箱',confirmRefreshMail:'确认更换邮箱',extendMail:'延长邮箱'};
     for(const action of actions)button(labels[action],()=>{if(['create','submitPassword','submitEmail','confirmRefreshMail'].includes(action)&&!confirm('确认执行“'+labels[action]+'”？'))return;const data={email:email.value,name:name.value,password:password.value};try{return window.__arenaAuth.act(action,data);}finally{if(action==='password'||action==='submitPassword')password.value='';}});
     el('h3','说明与资源');
-    button('加载状态',()=>({modules:api.loaded,errors:api.errors,broadcastEnabled:api.broadcastEnabled,probe:window.__MODEL_PROBE__?.version||'未就绪',native:'桌面 WebView2/CDP、本地 MCP、目录扫描不在浏览器权限范围'}));
+    button('加载状态',()=>({modules:api.loaded,errors:api.errors,broadcast:arena?(api.accounts?.requiresReload?.()?'账号切换，刷新后恢复':'默认开启'):'仅适用于 Arena',probe:window.__MODEL_PROBE__?.version||'未就绪',native:'桌面 WebView2/CDP、本地 MCP、目录扫描不在浏览器权限范围'}));
     for(const name of Object.keys(resources))button('下载 '+name,()=>{download(name,resources[name],name.endsWith('.html')?'text/html;charset=utf-8':'text/plain;charset=utf-8');return name==='gallery.html'?'原桌面图集模板仅供参考，需要 WebView2 宿主；请使用上方浏览器本地图集。':'已请求下载；demo 离线运行，不要注入实际 Arena 页。';});
     el('p','安装后请刷新 Arena。若已有其他探针脚本请禁用，避免网络钩子重复。导出文件中的正文/代码可能包含隐私。');
   }

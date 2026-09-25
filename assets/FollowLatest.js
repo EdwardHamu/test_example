@@ -3,10 +3,13 @@
   const visible = el => !!el && !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
   const label = el => ((el && (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent)) || '').trim().replace(/\s+/g, ' ');
   const testing = window.__arenaFollowLatestTest === true;
-  const wanted = window.__arenaFollowLatestWanted === true;
+  const STORAGE_KEY = 'arena-force-follow-bottom';
+  let wanted = window.__arenaFollowLatestWanted === true;
+  try { const saved=localStorage.getItem(STORAGE_KEY);if(saved!==null)wanted=saved==='true'; } catch (_) {}
+
   const CLICK_MS = 1200;
   const BOTTOM_GAP = 16; // Ignore subpixel rounding when the reader returns to the bottom.
-  // The manual switch keeps following while idle. During generation, following is automatic.
+  // Explicit switch AND generation state own scrolling; no account or user-scroll pause heuristics.
   const state = { started: true, enabled: testing || wanted, following: testing || wanted, suspended: false, userPaused: false,
     lastJump: 0, clicks: 0, sticks: 0, scrolls: 0, clickDelay: CLICK_MS };
   window.__arenaFollowLatest = state;
@@ -15,7 +18,12 @@
     return (typeof document.querySelectorAll === 'function' && [...document.querySelectorAll('main')].find(visible)) || null;
   }
   function logEl(main = mainEl()) {
-    return (main && [...main.querySelectorAll('[role="log"]')].find(visible)) || null;
+    if (!main) return null;
+    const logs = [...main.querySelectorAll('[role="log"]')].filter(visible);
+    // Agent layout: custom scrollbar owns the transcript; composer is its sibling.
+    return logs.find(el => el.getAttribute('data-custom-scrollbar') === 'true' &&
+      el.querySelector('[data-agent-transcript-message], [data-latest-assistant-response-bottom]')) ||
+      logs.find(el => el.querySelector('[data-agent-transcript-message]')) || logs[0] || null;
   }
   function blocked() {
     return typeof document.querySelectorAll === 'function' && [...document.querySelectorAll('[role="dialog"]')].some(visible);
@@ -97,21 +105,21 @@
     return candidate; // An empty transcript may become scrollable on the next render.
   }
   let activeScroller = null, activeRoute = null, lastScrollTop = 0, lastScrollHeight = 0, lastClientHeight = 0;
+  let resizeTargets = [];
+  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => schedule()) : null;
+  function trackSize(el, log) {
+    // Observe content as well as viewport: scrollHeight can grow without its border box growing.
+    const targets = [...new Set([el, log, log?.firstElementChild].filter(Boolean))];
+    if (targets.length === resizeTargets.length && targets.every((node,i) => node === resizeTargets[i])) return;
+    resizeObserver?.disconnect();
+    resizeTargets = targets;
+    for (const target of targets) resizeObserver?.observe(target);
+  }
   function atBottom(el) {
     return Math.max(0, el.scrollHeight - el.clientHeight - el.scrollTop) <= BOTTOM_GAP;
   }
   function onMessageScroll() {
-    const el = activeScroller;
-    if (!el || state.suspended) return;
-    const top = el.scrollTop;
-    if (atBottom(el)) {
-      if (state.userPaused) { state.userPaused = false; schedule(); }
-    } else if (state.following && top < lastScrollTop - 2) {
-      // Height growing underneath a pinned reader leaves scrollTop unchanged; only moving up pauses us.
-      state.userPaused = true;
-      state.following = false;
-    }
-    lastScrollTop = top;
+    if (activeScroller && state.enabled && !state.suspended) schedule();
   }
   function trackScroller(el) {
     const route = location.pathname;
@@ -144,24 +152,15 @@
     const main = mainEl(), log = logEl(main);
     const scroller = messageScroller(log, main);
     trackScroller(scroller);
+    trackSize(scroller, log);
     const running = generating(log, main);
-    const previousBottom = Math.max(0, lastScrollHeight - lastClientHeight);
-    const currentBottom = scroller ? Math.max(0, scroller.scrollHeight - scroller.clientHeight) : 0;
-    // Stop controls and private React state can change: a growing transcript is enough if the
-    // reader was at its bottom, but never pull someone who scrolled upward while idle.
-    const grewAtBottom = !!scroller && currentBottom > previousBottom + 1 &&
-      lastScrollTop >= previousBottom - BOTTOM_GAP && scroller.scrollTop >= lastScrollTop - 2;
-    // Read scrollTop before writing: a manual upward drag may precede its asynchronous scroll event.
-    if (scroller && state.following && !state.userPaused && !atBottom(scroller) &&
-        scroller.scrollTop < lastScrollTop - 2) state.userPaused = true;
-    lastScrollHeight = scroller?.scrollHeight ?? 0;
-    lastClientHeight = scroller?.clientHeight ?? 0;
-    state.following = !state.userPaused && (state.enabled || running || grewAtBottom);
+    state.userPaused = false; // Compatibility field; user scrolling never pauses forced follow.
+    state.following = state.enabled && running;
     if (!state.following) return { ok: true, enabled: state.enabled, running, userPaused: state.userPaused, clicked: false };
-    if (blocked()) return { ok: false, blocked: true, clicked: false };
+    // Only change the transcript scrollbar; no modal or account gate for this view-only switch.
     const hasScroller = pinMessageArea(scroller);
-    // Manual always-follow retains the old button behavior. Automatic mode only clicks an explicitly named jump.
-    const jump = state.enabled ? jumpButton(main) : hasScroller ? null : jumpButton(main, true);
+    // A measured transcript scrollbar is enough; never guess at nearby composer/workspace controls.
+    const jump = hasScroller ? null : jumpButton(main, true);
     if (!jump) return { ok: true, enabled: state.enabled, running, scrolled: hasScroller, clicked: false };
     const t = now();
     if (t - state.lastJump < CLICK_MS) return { ok: true, enabled: state.enabled, running, clicked: false, waiting: true };
@@ -172,7 +171,9 @@
   }
   function setEnabled(on) {
     state.enabled = !!on;
-    if (on) state.userPaused = false; // An explicit opt-in resumes following.
+    state.userPaused = false;
+    window.__arenaFollowLatestWanted = state.enabled;
+    try { localStorage.setItem(STORAGE_KEY,String(state.enabled)); } catch (_) {}
     return stick();
   }
   function suspend() {
@@ -182,6 +183,8 @@
     state.following = false;
     activeScroller?.removeEventListener?.('scroll', onMessageScroll);
     activeScroller = null;
+    resizeObserver?.disconnect();
+    resizeTargets = [];
     return { ok: true, enabled: false, suspended: true, clicked: false };
   }
   state.stick = stick;

@@ -131,6 +131,33 @@ test('notification off defers announcement until enabled, then stays deduplicate
   w.check(); assert.equal(sounds, 0); enabled = true; w.check(); w.check(); assert.equal(sounds, 1);
   enabled = false; w.check(); enabled = true; w.check(); assert.equal(sounds, 1);
 });
+test('choice appearance notifies the server once even when local notifications are disabled', () => {
+  let enabled = false, sounds = 0, sent = 0;
+  const first = fixture({id:'m1'}).message, pending = [first];
+  const w = load().api.start({enabled:()=>enabled, detect:()=>pending,
+    sound:()=>{sounds++;}, onAppear:()=>{sent++;}});
+  assert.equal(sent,1);assert.equal(sounds,0);
+  pending[0] = fixture({id:'m1'}).message;w.check();w.check();
+  assert.equal(sent,1,'the same message ID survives a React remount');
+  pending.push(fixture({id:'m2'}).message);w.check();assert.equal(sent,2);
+  enabled = true;w.check();w.check();
+  assert.equal(sent,2,'enabling local sound later must not resend to the server');
+  assert.equal(sounds,1,'local notification remains independently controlled');
+});
+test('a batch of new choices sends one notice; a later appearance is rearmed after two misses', () => {
+  const first=fixture().message,second=fixture().message;
+  let pending=[first,second],sent=0;
+  const w=load().api.start({detect:()=>pending, sound:()=>{}, onAppear:()=>{sent++;}});
+  assert.equal(sent,1);w.check();assert.equal(sent,1);
+  pending=[];w.check();pending=[first,second];w.check();assert.equal(sent,1);
+  pending=[];w.check();w.check();pending=[first,second];w.check();assert.equal(sent,2);
+});
+test('server-notification callback failures do not break choice detection or sound',async()=>{
+  let sounds=0;
+  const w=load().api.start({detect:()=>[fixture({id:'m1'}).message],
+    onAppear:()=>Promise.reject(Error('network')),sound:()=>{sounds++;}});
+  await Promise.resolve();w.check();assert.equal(sounds,1);
+});
 test('one missed poll is tolerated; two misses rearm a later choice', () => {
   const message = fixture().message; let pending = [message], sounds = 0;
   const w = load().api.start({detect: () => pending, sound: () => { sounds++; }});
