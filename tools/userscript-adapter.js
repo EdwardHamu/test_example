@@ -42,7 +42,7 @@
       const tools=check('Markdown 包含工具记录',true,()=>{});
       button('导出 Markdown',()=>{const r=api.markdown.render(api.markdown.capture(),{reasoning:reasoning.checked,tools:tools.checked});download(r.filename,r.markdown,'text/markdown;charset=utf-8');return {stats:r.stats,warnings:r.warnings};});
       button('下载会话备份',()=>{download('arena-conversation.json',JSON.stringify(api.markdown.capture(),null,2),'application/json');return '已请求下载；正文可能含隐私，请勿直接公开。';});
-      check('跟随最新消息',window.__arenaFollowLatest?.enabled,on=>{window.__arenaFollowLatestWanted=on;return window.__arenaFollowLatest.setEnabled(on);});
+      check('结束后也跟随最新消息（运行时自动置底）',window.__arenaFollowLatest?.enabled,on=>{window.__arenaFollowLatestWanted=on;return window.__arenaFollowLatest.setEnabled(on);});
       let plan=null;
       button('1. 检查修复并备份',()=>{plan=window.__arenaConversationRecovery.prepare();apply.disabled=!plan.eligible;if(plan.eligible){download('arena-recovery-backup.json',JSON.stringify(plan.backup,null,2),'application/json');return '已请求下载修复备份。确认文件已保存后，再点击应用；仅处理已验证的孤立末尾消息。';}return '未检测到可安全修复的孤立节点，不做修改。';});
       const apply=button('2. 确认备份后应用修复',()=>{if(!plan?.eligible)return;if(!confirm('确认备份文件已保存？将移除经验证的孤立末尾消息；这不是服务端数据修复。'))return;const r=window.__arenaConversationRecovery.apply(plan.token);apply.disabled=true;return r;});apply.disabled=true;

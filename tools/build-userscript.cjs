@@ -10,7 +10,7 @@ const manifest=Object.fromEntries(files.map(f=>[f,hash(sources[f])]));
 let output=`// ==UserScript==
 // @name         Arena 模型助手 · Assets 整合版
 // @namespace    arena-model-companion.local
-// @version      2026.09.24.8
+// @version      2026.09.24.14
 // @description  模型探针、推理/额度、网页抽卡、会话导出修复、候选与登录辅助；外部广播需明确开启
 // @match        https://arena.ai/*
 // @match        https://10minutemail.one/*
@@ -25,7 +25,7 @@ let output=`// ==UserScript==
 'use strict';
 if(window.top!==window||!['arena.ai','10minutemail.one'].includes(location.hostname))return;
 if(window.__ARENA_USERSCRIPT__)return;
-const api=window.__ARENA_USERSCRIPT__={version:'2026.09.24.8',loaded:[],errors:[],broadcastEnabled:false};
+const api=window.__ARENA_USERSCRIPT__={version:'2026.09.24.14',loaded:[],errors:[],broadcastEnabled:false};
 function load(name,fn){try{const result=fn();api.loaded.push(name);return result;}catch(e){api.errors.push({name,message:String(e.message||e)});console.warn('[Arena userscript]',name,e);}}
 `;
 const executable=s=>s.trim().replace(/;+$/,'');
@@ -97,7 +97,7 @@ output+=`${executable(read('tools/userscript-adapter.js'))}(api,${JSON.stringify
 new vm.Script(output,{filename:'user.js'});
 const dir=path.join(root,'userscript-build');fs.mkdirSync(dir,{recursive:true});
 fs.writeFileSync(path.join(dir,'user.candidate.js'),output);
-fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({version:'2026.09.24.8',assets:manifest,resources:Object.fromEntries(Object.entries(resources).map(([n,s])=>[n,hash(s)])),adapter:hash(read('tools/userscript-adapter.js')),hitRename:hash(read('tools/userscript-hit-rename.js')),accountCompat:hash(read('tools/userscript-account-compat.js')),sessionUsage:hash(read('tools/userscript-session-usage.js')),outputSha256:hash(output),bytes:Buffer.byteLength(output)},null,2));
+fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({version:'2026.09.24.14',assets:manifest,resources:Object.fromEntries(Object.entries(resources).map(([n,s])=>[n,hash(s)])),adapter:hash(read('tools/userscript-adapter.js')),hitRename:hash(read('tools/userscript-hit-rename.js')),accountCompat:hash(read('tools/userscript-account-compat.js')),sessionUsage:hash(read('tools/userscript-session-usage.js')),outputSha256:hash(output),bytes:Buffer.byteLength(output)},null,2));
 if(process.argv.includes('--write')){
  const dest=path.join(root,'user.js');const before=fs.readFileSync(dest);const backup=path.join(root,'backups','user-'+new Date().toISOString().replace(/[:.]/g,'-')+'.js');fs.mkdirSync(path.dirname(backup),{recursive:true});fs.writeFileSync(backup,before,{flag:'wx'});
  if(hash(fs.readFileSync(backup))!==hash(before))throw Error('Backup mismatch');

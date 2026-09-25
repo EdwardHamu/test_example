@@ -150,7 +150,7 @@ class NodeMock {
  get title(){return this.getAttribute('title')||'';}
 }
 function panelHarness({host='hud',origin='https://arena.ai',pathname='/agent/'+SESSION,iframe=false,mutations=true}={}){
- let current=snapshot(),now=CLOCK,network=0,next=0;const hosts=new Map(),created=[],timers=new Map(),observers=[];
+ let current=snapshot(),pulse=null,now=CLOCK,network=0,next=0;const hosts=new Map(),created=[],timers=new Map(),observers=[];
  const rootOf=n=>{while(n.parentNode)n=n.parentNode;return n.observerRoot||n;};
  const changed=(target,type)=>{
   if(!target.isConnected)return;const root=rootOf(target);
@@ -180,14 +180,14 @@ function panelHarness({host='hud',origin='https://arena.ai',pathname='/agent/'+S
   return rounds;
  };
  if(host)addHost(host);
- const window={__MODEL_PROBE__:{usdQuotaSnapshot:()=>current}};window.top=iframe?{}:window;
+ const window={__MODEL_PROBE__:{usdQuotaSnapshot:()=>current,pulseInfo:()=>pulse}};window.top=iframe?{}:window;
  class Clock extends Date {static now(){return now;}}
  const env=load({window,document,Date:Clock,location:{origin,pathname},MutationObserver:mutations?ObserverMock:undefined,fetch(){network++;throw Error('Unexpected network');},
   localStorage:{getItem(){throw Error('Unexpected storage');},setItem(){throw Error('Unexpected storage');}},
   setInterval:(fn,ms)=>{timers.set(++next,{fn,ms});return next;},clearInterval:id=>timers.delete(id)});
  const panel=env.req('usd-quota-panel');
  const writes=()=>created.reduce((sum,n)=>sum+n.writes+[...n.fields.values()].reduce((count,f)=>count+f.writes,0),0);
- return {...env,panel,window,document,created,timers,observers,hosts,addHost,dropHost,replaceContent,flushDOM,writes,setSnapshot:s=>current=s,setNow:n=>now=n,network:()=>network,
+ return {...env,panel,window,document,created,timers,observers,hosts,addHost,dropHost,replaceContent,flushDOM,writes,setSnapshot:s=>current=s,setPulse:v=>pulse=v,setNow:n=>now=n,network:()=>network,
   tick:()=>{for(const {fn}of [...timers.values()])fn();},cards:()=>created.filter(n=>n.className==='usd-card'&&n.isConnected)};
 }
 const field=(card,id)=>card.querySelector('[data-usd="'+id+'"]');
@@ -346,12 +346,41 @@ test('observers are disconnected on disposal and queued callbacks cannot resurre
 });
 test('reinjection replaces the previous disposable implementation rather than keeping its flicker',()=>{
  const e=panelHarness();let refreshed=0,disposed=0;
- const old={version:'usd-quota-card.2',refresh(){refreshed++;},dispose(){disposed++;delete e.window[KEY];}};e.window[KEY]=old;
- const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.equal(widget.version,'usd-quota-card.5');
+ const old={version:'usd-quota-card.5',refresh(){refreshed++;},dispose(){disposed++;delete e.window[KEY];}};e.window[KEY]=old;
+ const widget=e.panel.mount();assert.notEqual(widget,old);assert.equal(disposed,1);assert.equal(refreshed,0);assert.equal(widget.version,'usd-quota-card.6');
  assert.equal(e.window[KEY],widget);assert.equal(e.cards().length,1);assert.equal(e.timers.size,1);widget.dispose();
 });
 test('stale warning updates only once when the five-minute boundary is crossed',()=>{
  const e=panelHarness(),widget=e.panel.mount();e.flushDOM();const before=e.writes();e.setNow(CLOCK+300001);e.tick();e.flushDOM();
  assert.equal(e.writes(),before+1);assert.match(field(e.cards()[0],'warning').textContent,/超过 5 分钟/);const after=e.writes();
  e.tick();e.flushDOM();assert.equal(e.writes(),after);widget.dispose();
+});
+
+
+test('the USD card top-right badge uses the Pulse last-refresh timestamp, not a fabricated reset time',()=>{
+ const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0],badge=field(card,'pulse-refreshed');
+ assert.ok(badge,'a dedicated badge field should replace the static USD snapshot label');
+ assert.ok(!card.innerHTML.includes('USD · 记录快照'));
+ assert.equal(badge.textContent,'精力刷新 —');
+ assert.match(badge.title,/不是美元额度重置时间/);
+ const expected=new Date(STAMP).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+ e.setPulse({pulse:67,refreshedAt:STAMP});e.tick();
+ assert.equal(badge.textContent,'精力刷新 '+expected);
+ assert.match(badge.title,/精力值上次刷新：/);
+ assert.match(badge.title,/不是美元额度重置时间/);
+ assert.equal(field(card,'remaining').textContent,'$75.12','the quota amounts remain unchanged');
+ const before=e.writes();e.tick();e.flushDOM();assert.equal(e.writes(),before,'unchanged Pulse data must not cause DOM writes');
+ assert.equal(e.network(),0);widget.dispose();
+});
+
+test('Pulse timestamp badge updates independently of USD snapshot availability, and invalid dates are unknown',()=>{
+ const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0],badge=field(card,'pulse-refreshed');
+ e.setSnapshot({status:'unavailable',quota:null});e.setPulse({pulse:20,refreshedAt:STAMP});widget.refresh();
+ assert.match(badge.textContent,/精力刷新 (?!—)/);
+ e.setPulse({pulse:20,refreshedAt:'<img src=x onerror=alert(1)>'});widget.refresh();
+ assert.equal(badge.textContent,'精力刷新 —');
+ assert.ok(!card.innerHTML.includes('onerror=alert'));
+ e.setPulse(null);widget.refresh();assert.equal(badge.textContent,'精力刷新 —');
+ const before=e.writes();e.tick();e.flushDOM();assert.equal(e.writes(),before);
+ assert.equal(e.network(),0);widget.dispose();
 });

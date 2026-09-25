@@ -2,13 +2,13 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const src=fs.readFileSync(path.join(__dirname,'../tools/userscript-session-usage.js'),'utf8');
 const url='https://arena.ai/agent/11111111-1111-1111-1111-111111111111';
 function setup(options={}){
- const storage=options.storage||new Map(),elements=[];let scope='a',run=null;
+ const storage=options.storage||new Map(),elements=[],timers=[];let scope='a',run=null;
  class E{constructor(tag){this.tagName=tag;this.children=[];this.style={};this.textContent='';this.hidden=false;this.offsetWidth=300;elements.push(this);}append(...v){this.children.push(...v);}attachShadow(){return this.shadowRoot=new E('shadow');}replaceChildren(){this.children=[];}getBoundingClientRect(){return {left:10,top:90};}setAttribute(k,v){this[k]=v;}}
  const doc={body:options.dom?new E('body'):null,createElement:t=>new E(t),addEventListener(){}};
  const w={__MODEL_PROBE__:{runState:()=>run,bus:{generation:1}},addEventListener(){}};const loc={origin:'https://arena.ai',pathname:new URL(url).pathname};
- const api={accounts:{scope:()=>scope}};const c=vm.createContext({window:w,document:doc,location:loc,innerWidth:1000,innerHeight:800,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>{if(options.failStorage)throw Error('full');storage.set(k,v);}},setInterval(){},Date,console});
+ const api={accounts:{scope:()=>scope}};const c=vm.createContext({window:w,document:doc,location:loc,innerWidth:1000,innerHeight:800,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>{if(options.failStorage)throw Error('full');storage.set(k,v);}},setInterval:(fn)=>{timers.push(fn);return timers.length;},Date,console});
  vm.runInContext(src,c)(api);
- return {u:api.sessionUsage,storage,loc,w,elements,setScope:x=>scope=x,setRun:x=>run=x};
+ return {u:api.sessionUsage,storage,loc,w,elements,tick:()=>timers[0]?.(),setScope:x=>scope=x,setRun:x=>run=x};
 }
 const span=(kind,values,extra={})=>({kind,spanId:kind+'1',turn:1,partial:false,values,...extra});
 const detail=spans=>({checkedAt:'2026-09-24T08:00:00Z',spans});
@@ -37,3 +37,58 @@ test('malformed local records are discarded; extra raw fields are never re-persi
 test('storage is retried after temporary failure without needing another trace',()=>{const options={failStorage:true},e=setup(options);install(e,detail([usage(),cost()]));assert.equal(e.u.snapshot().storageFailed,true);options.failStorage=false;assert.equal(e.u.snapshot().storageFailed,false);assert.equal(e.storage.size,1);});
 test('cache writes are displayed separately, not added to total tokens',()=>{const {u}=setup();const a=row(u,detail([span('usage',{inputTokens:10,outputTokens:2,cacheWriteTokens:7}),cost()]));assert.equal(a.metrics.cachedWrite.value,7);assert.equal(a.metrics.total.value,12);});
 test('DOM controls collapse and drag with bounds and save the position',()=>{const e=setup({dom:true}),h=e.elements.find(x=>x.tagName==='header'),body=e.elements.find(x=>x.tagName==='section'),host=e.elements.find(x=>x.id==='arena-session-usage');const fold=e.elements.find(x=>x.title==='折叠/展开');fold.onclick();assert.equal(body.hidden,true);fold.onclick();assert.equal(body.hidden,false);h.onpointerdown({target:h,button:0,clientX:10,clientY:90,pointerId:1,preventDefault(){}});h.onpointermove({clientX:9000,clientY:9000});assert.equal(host.style.left,'696px');assert.equal(host.style.top,'740px');h.onpointerup({pointerId:1});assert.ok(e.storage.has('arena-userscript-usage-position'));});
+
+
+test('collapsed float keeps the current-session cumulative input visible and refreshes without expanding',()=>{
+ const e=setup({dom:true}),body=e.elements.find(x=>x.tagName==='section'),fold=e.elements.find(x=>x.title==='折叠/展开');
+ const badge=e.elements.find(x=>x.className==='compact-input');
+ assert.ok(badge,'a compact input label should be mounted in the header');
+ assert.equal(badge.hidden,true,'expanded mode retains its original body layout');
+ fold.onclick();
+ assert.equal(body.hidden,true);assert.equal(badge.hidden,false);
+ assert.equal(badge.textContent,'输入 Token —','unknown cumulative usage must not become a fabricated zero');
+ e.setRun({runId:'run_a',tokenUrl:url,usage:{input:900,output:1,total:901}});
+ e.tick();
+ assert.equal(e.u.snapshot().latest.input,900);
+ assert.equal(badge.textContent,'输入 Token —','latest response is a reference, not a cumulative session input');
+ install(e,detail([usage(),cost()]));
+ e.tick();
+ assert.equal(body.hidden,true);
+ assert.equal(badge.textContent,'输入 Token 100');
+ fold.onclick();
+ assert.equal(body.hidden,false);assert.equal(badge.hidden,true);
+ assert.equal(e.u.snapshot().metrics.input.value,100);
+});
+
+test('collapsed input preserves incomplete and zero values but never leaks between accounts or conversations',()=>{
+ const e=setup({dom:true}),fold=e.elements.find(x=>x.title==='折叠/展开');fold.onclick();
+ const badge=e.elements.find(x=>x.className==='compact-input');
+ install(e,detail([usage()]));
+ e.tick();
+ assert.equal(badge.textContent,'输入 Token 100 *','same incomplete/known-subtotal marker as the expanded input row');
+ e.setScope('b');e.tick();assert.equal(badge.textContent,'输入 Token —');
+ e.setScope('a');e.loc.pathname='/agent/22222222-2222-2222-2222-222222222222';e.tick();
+ assert.equal(badge.textContent,'输入 Token —');
+ e.loc.pathname=new URL(url).pathname;e.tick();assert.equal(badge.textContent,'输入 Token 100 *');
+ e.setScope(null);e.tick();assert.equal(badge.textContent,'输入 Token —','unverified account hides prior input');
+ const zero=setup({dom:true});zero.elements.find(x=>x.title==='折叠/展开').onclick();
+ install(zero,detail([span('usage',{inputTokens:0,outputTokens:0}),span('cost',{chargedUsd:0,costUsd:0})]));
+ zero.tick();assert.equal(zero.elements.find(x=>x.className==='compact-input').textContent,'输入 Token 0');
+});
+
+
+test("a prior account's run cannot be reattributed as usage or latest reference after scope changes",()=>{
+ const e=setup({dom:true});e.elements.find(x=>x.title==='折叠/展开').onclick();
+ const badge=e.elements.find(x=>x.className==='compact-input');
+ e.setRun({runId:'old_run',tokenUrl:url,usage:{input:555},automaticTrace:{url,runId:'old_run',generation:1,detail:detail([usage(),cost()])}});
+ assert.equal(e.u.snapshot().metrics.input.value,100);
+ e.setScope('b');
+ const other=e.u.snapshot();
+ assert.equal(other.latest,null);
+ assert.equal(other.metrics.input.value,null);
+ assert.equal(badge.textContent,'输入 Token —');
+ e.setRun({runId:'new_run',tokenUrl:url,automaticTrace:{url,runId:'new_run',generation:1,detail:detail([span('usage',{inputTokens:7,outputTokens:2,totalTokens:9}),cost()])}});
+ assert.equal(e.u.snapshot().metrics.input.value,7,'a genuinely new run belongs to the new account');
+ e.setScope('a');
+ assert.equal(e.u.snapshot().metrics.input.value,100,'the former account keeps only its own stored trace');
+});

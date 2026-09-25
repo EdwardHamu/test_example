@@ -2,7 +2,7 @@
 
 ## 安装
 
-交付文件：项目根目录 `user.js`（943,375 字节，单文件，不需要本地服务器或 @require）。
+交付文件：项目根目录 `user.js`（497,631 字节，单文件，不需要本地服务器或 @require）。
 
 1. 在 Tampermonkey 新建脚本，将 user.js 全文粘贴并保存，或通过管理器导入文件。
 2. 禁用重复的 Arena 探针脚本，刷新 https://arena.ai/ 。不要同时用桌面注入版和该脚本重复注入。
@@ -21,14 +21,18 @@
 | CandidateBridge.js | 候选状态、HTML 文件选择、预览/源码/下载、对话重命名等操作按钮；保留唯一元素校验 |
 | ConversationMarkdown.js | 接住原 IIFE 返回值并提供 Markdown 导出、推理/工具选项及 JSON 快照下载，不再只是执行后丢弃 API |
 | ConversationRecovery.js | 检查修复 → 下载原始备份 → 用户确认备份已保存 → 应用；保留 URL/消息/草稿不变验证，不自动修改会话 |
-| FollowLatest.js | 提供跟随最新开关，沿用原滚动/按钮保护 |
+| FollowLatest.js | 生成中自动将当前会话消息滚动条置底；主动上滑后暂停，手动回到底部恢复；空闲时可开启持续跟随；弹窗或账号切换时暂停 |
 | ArenaBalance.js | 接住原函数表达式；保持原版本余额接口禁用/不可用行为，不虚构余额或重新发账单请求 |
 | gallery.html | 原桌面模板嵌入为可下载资源；实际提供浏览器替代图集：手选本地图片、缩略图、放大、另存、来源会话链接、清空 |
 | welcome.html / demo.html | 嵌入为下载资源；离线 demo 不注入真实 Arena 页 |
 | png / ico | PNG 作为内嵌脚本图标；ICO 是桌面图标，在浏览器无独立运行功能 |
 | WebView2 LICENSE / NOTICE | 内嵌为可下载说明资源，保留原文件 |
 
-所有原 assets 文件未修改。第三方/原作者注释随源码保留。
+部分 assets 为新功能更新；其他来源文件及原作者注释随源码保留。
+
+当前会话用量浮窗折叠后仍显示已采集的**累计输入 Token**；无可信记录显示“—”，不完整小计标“*”。最新响应参考不混入累计；切换账号或会话时不会沿用旧值。
+
+美元额度卡片右上角展示精力值接口的 `refreshedAt`（**上次刷新**的本地时间），没有有效时间时显示“—”。该字段不是美元额度的重置时刻；卡片不据此推算重置、不额外发起网络请求。
 
 ## 不能由油猴等价提供的桌面能力
 
@@ -57,7 +61,7 @@ node tools/build-userscript.cjs --write
 
 不带 --write 只生成 `userscript-build/user.candidate.js` 和哈希 manifest；带 --write 会先备份现有 user.js，再以临时文件替换。每次 assets 改动后重新构建，不建议手工修改生成文件。
 
-本轮原 user.js 备份：`backups/user-2026-09-24T07-12-37-174Z.js`。
+本轮更新前的 user.js 备份：`backups/user-2026-09-24T14-40-31-531Z.js`（上一版）；初始备份：`backups/user-2026-09-24T13-15-44-766Z.js`。
 最终 SHA-256：`3991989929e4ee8ab212c288958a1ed232074dc9153e5403fb82206f3ec590e1`。
 
 验证：

@@ -1,14 +1,14 @@
 {
-  "version": "2026.09.24.8",
+  "version": "2026.09.24.14",
   "assets": {
     "AuthBridge.js": "4c13810b3399aedb1a34de59ca1111498cb7a9b5303fa1362940be6519b5e750",
     "PageBridge.js": "f51cb3967f4364b20e4a1521d635cbe9e907e71c7b827b28d61509309d64bd2c",
     "CandidateBridge.js": "c17e5c32e2b8f8b24cbd099f761e383caaec103f3812b90a01e4321d65cb80e7",
     "ConversationRecovery.js": "3305003f6676872708d7fcc6ba1abb73c8bb5a5f73c98f3dacebc409c72228a8",
-    "FollowLatest.js": "0b5e6250c4c05caab5d4f70ee399266a05fe295c5cc7005c1e9c674b81a50782",
+    "FollowLatest.js": "58296812a7a9cff2df2577a3bea46b1217aa76431fb27b1f3a7e4d4cc994fe15",
     "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
     "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
-    "arena-model-probe.inject.js": "69157e975b9a82b73de494c6858c440784a4753ccf7a18da7537953e39d26fc4"
+    "arena-model-probe.inject.js": "7e56ee0a3958ce54948ce6d11e4c6c79c0b123619de4fa446b8b2516c7d3819d"
   },
   "resources": {
     "welcome.html": "b826959621dc4435e40e2e6633cce0e871fa040b92dd9efaf30d5a6d7e727ac4",
@@ -17,10 +17,10 @@
     "WebView2-LICENSE.txt": "24deadea987f1c7682753a8cef4e70bde8a13cc65684e06cab9a965469362075",
     "WebView2-NOTICE.txt": "9dd2e51ad1f27741d0cbf74227d03fecf55c43e3081501f9d7f553b16d33835e"
   },
-  "adapter": "2cdfd5ee74a46cc857f43e5e0566069ac15ab474d577f934b680c668b1a7d935",
+  "adapter": "318eb682ebbd700d3bf52b3f5d0bdb2db09554709e3ea3706ebb407bd272dead",
   "hitRename": "ffabc77811fde3268d5bfaddb2f1cf8183796aab102b857dd02447c8ebf2152c",
-  "accountCompat": "9ef8669120c881e4537f8c97ff171d851c00452190f563b88e72bf2da2198093",
-  "sessionUsage": "bae8cdb96cf53991e9e235982d5b4f334c9db6f4a93baa6dd86108da8da8153e",
-  "outputSha256": "e796ee44c5ae4fcceb5e06fa236f378c5aad5e25143a5d1de409c1f9b248f98d",
-  "bytes": 483931
+  "accountCompat": "3e85fe297cfc7c439f9ed1d308e1522a5f91204d8da6cc57abeb1d193cf38066",
+  "sessionUsage": "274c9a0824bb11faf07e930f4600e22bf5ff20447d55d62d702d92933a9bb16e",
+  "outputSha256": "1696d65a827243657c19672eeec2fe59a4b3a37ea9c53bbf6527d4c45945f86e",
+  "bytes": 498842
 }

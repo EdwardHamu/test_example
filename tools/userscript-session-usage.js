@@ -55,7 +55,7 @@
  }
  const read=k=>{try{return JSON.parse(localStorage.getItem(k)||'null');}catch{return null;}};
  const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));return true;}catch{return false;}};
- let contextKey='',ledger=merge(null,[]),storageFailed=false,host=null,box=null,body=null,header=null,current=null,stamp='',lastContext='',minimized=false;
+ let contextKey='',ledger=merge(null,[]),storageFailed=false,runOwners=new Map(),host=null,box=null,body=null,header=null,compactInput=null,current=null,stamp='',lastContext='',minimized=false;
  function capture(){
   const account=api.accounts?.scope?.(),url=location.origin+location.pathname.replace(/\/$/,'');
   if(!account)return {state:'blocked',note:'账号未确认或已切换；数据已隐藏，请确认账号/刷新页面。'};
@@ -63,8 +63,10 @@
   const key=BASE+account+':'+encodeURIComponent(url);
   if(key!==contextKey){contextKey=key;ledger=merge(read(key),[]);storageFailed=false;stamp='';}
   const p=window.__MODEL_PROBE__,run=p?.runState?.(),trace=run?.automaticTrace;
+  // A still-live run belongs to the first verified account that observed it, never a later scope.
+  if(run?.runId&&!runOwners.has(run.runId))runOwners.set(run.runId,account);
   let latest=null;
-  if(run?.tokenUrl===url&&run.runId){
+  if(run?.tokenUrl===url&&run.runId&&runOwners.get(run.runId)===account){
    if(trace?.url===url&&trace.runId===run.runId&&Number.isSafeInteger(trace.generation)&&trace.generation===p?.bus?.generation){
     const items=analyze(trace.detail,run.runId),fingerprint=JSON.stringify(items);
     if(fingerprint!==stamp||storageFailed){const next=merge(merge(read(key),Object.values(ledger.records)),items);ledger=next;storageFailed=!write(key,next);stamp=fingerprint;}
@@ -78,9 +80,10 @@
  function mount(){
   if(host||!document.body)return;
   host=make('div');host.id='arena-session-usage';host.style.cssText='position:fixed;top:90px;right:16px;z-index:2147483644;width:300px;max-width:calc(100vw - 24px)';
-  const root=host.attachShadow({mode:'open'}),style=make('style');style.textContent=':host{font:12px/1.5 system-ui;color:#e8eef8}.box{background:#142134;border:1px solid #526681;border-radius:12px;box-shadow:0 8px 30px #0005;overflow:hidden}header{display:flex;align-items:center;gap:8px;padding:10px;cursor:move;touch-action:none;background:#203149}strong{flex:1}button{cursor:pointer;background:transparent;color:inherit;border:1px solid #617089;border-radius:5px;padding:2px 7px}section{padding:10px;max-height:65vh;overflow:auto}.row{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.value{font-variant-numeric:tabular-nums}p{margin:7px 0;color:#b9c8dd;font-size:11px;overflow-wrap:anywhere}[hidden]{display:none!important}';root.append(style);
+  const root=host.attachShadow({mode:'open'}),style=make('style');style.textContent=':host{font:12px/1.5 system-ui;color:#e8eef8}.box{background:#142134;border:1px solid #526681;border-radius:12px;box-shadow:0 8px 30px #0005;overflow:hidden}header{display:flex;align-items:center;gap:8px;padding:10px;cursor:move;touch-action:none;background:#203149}strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.compact-input{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums;font-size:11px}button{cursor:pointer;background:transparent;color:inherit;border:1px solid #617089;border-radius:5px;padding:2px 7px}section{padding:10px;max-height:65vh;overflow:auto}.row{display:flex;justify-content:space-between;gap:10px;margin:5px 0}.value{font-variant-numeric:tabular-nums}p{margin:7px 0;color:#b9c8dd;font-size:11px;overflow-wrap:anywhere}[hidden]{display:none!important}';root.append(style);
   box=make('div','',root);box.className='box';header=make('header','',box);make('strong','当前会话 · 用量',header);
-  const fold=make('button','−',header);fold.title='折叠/展开';fold.onclick=()=>{minimized=!minimized;body.hidden=minimized;fold.textContent=minimized?'+':'−';};
+  compactInput=make('span','',header);compactInput.className='compact-input';compactInput.hidden=true;
+  const fold=make('button','−',header);fold.title='折叠/展开';fold.onclick=()=>{minimized=!minimized;body.hidden=minimized;compactInput.hidden=!minimized;fold.textContent=minimized?'+':'−';refresh();};
   const hide=make('button','×',header);hide.title='隐藏浮窗（可在 Arena 工具中重新打开）';hide.onclick=()=>api.sessionUsage.hide();
   body=make('section','',box);document.body.append(host);host.hidden=read(HIDDEN)===true;
   const pos=read(POSITION);if(pos&&Number.isFinite(pos.x)&&Number.isFinite(pos.y))position(pos.x,pos.y);
@@ -94,7 +97,14 @@
  const tokens=n=>n===null?'—':n.toLocaleString('zh-CN');
  const usd=n=>n===null?'—':n===0?'$0.00':n<.000001?'<$0.000001':'$'+n.toFixed(6).replace(/0+$/,'').replace(/\.$/,'');
  function paint(s){
-  if(!body)return;body.replaceChildren();make('p',s.note,body);
+  if(!body)return;
+  // The compact header uses the SAME observed, account/session-scoped input metric as the expanded row.
+  // Latest-response reference values are deliberately excluded from this cumulative total.
+  const input=s.state==='ready'?s.metrics?.input:null,value=input?.value??null;
+  compactInput.textContent='输入 Token '+tokens(value)+(input?.incomplete&&value!==null?' *':'');
+  compactInput.title=s.state==='ready'?'当前会话已采集输入 Token'+(input?.incomplete?'；存在缺失，仅为已知小计':'')+(s.truncated?'；较早记录已裁剪':''):s.note||'尚无可信记录';
+  compactInput.hidden=!minimized;
+  body.replaceChildren();make('p',s.note,body);
   if(s.state!=='ready')return;
   const sid=s.url.split('/').pop();make('p','会话 '+sid.slice(0,8)+'… · 已记录 '+s.turns+' 轮',body);
   for(const [f,label]of [['input','输入 Token'],['output','输出 Token'],['total','总 Token'],['reasoning','推理 Token（不额外相加）'],['cachedInput','缓存读取 Token'],['cachedWrite','缓存写入 Token'],['chargedUsd','扣费 USD'],['costUsd','模型成本 USD']]){
