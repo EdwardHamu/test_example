@@ -11,7 +11,7 @@
   const cache = new Map(), lookups = new Map(), writes = new Map(), revisions = new Map();
   const queue = [], queued = new Set(), managed = new Map(), pending = new Map();
   let activeGets = 0, activePosts = 0, stopped = false, watched = [], scheduled = false;
-  let helperReady = false, sequence = 0, currentId = null;
+  let helperReady = false, sequence = 0, currentId = null, writeScope = null;
   const stats = {saved:0,found:0,missing:0,errors:0,lastError:''};
   const now = () => Date.now();
   // The grant-free page script talks to a separate privileged helper by string-only DOM events.
@@ -23,7 +23,8 @@
     if (typeof value !== 'string') return null;
     const name = value.trim();
     return name && name.length <= 200 && !/[\x00-\x1f\x7f]/.test(name)
-      && !/^(?:未知|未识别|等待首个对话|unknown|unrecognized)$/i.test(name) ? name : null;
+      && !/Bearer\s|eyJ[\w-]+\.[\w-]+\./i.test(name)
+      && !/^(?:未知|未识别|未提供|等待首个对话|unknown|unrecognized)$/i.test(name) ? name : null;
   };
   const validId = value => typeof value === 'string' && ROUTE.test('/agent/' + value)
     ? value.toLowerCase() : null;
@@ -35,6 +36,10 @@
   }
   function frozen() {
     if (!stopped && api.accounts?.requiresReload?.()) halt();
+    if (!stopped && writeScope) {
+      let scope;try{scope=api.accounts?.scope?.();}catch{}
+      if(scope!==writeScope)halt();
+    }
     return stopped;
   }
   function fail(error) {
@@ -125,18 +130,33 @@
     repaint(id, model);
   }
   function observeModels() {
-    let observed;try { observed=api.reasoningInspector?.uploadModel?.(); } catch { return; }
-    const id=validId(observed?.sessionId), model=normalizeModel(observed?.model);
-    if(!id||!model||observed.source!=='reasoning-inspector'||id!==idFromHref(location.href))return;
-    {
-      let entry = writes.get(id);
-      if (!entry) {
-        const confirmedName = cache.get(id)?.model === model && cache.get(id)?.until > now() ? model : null;
-        entry = {wanted:model, confirmed:confirmedName, running:false, failures:0, retryAt:0};
-        writes.set(id, entry);
-      } else if (entry.wanted !== model) {
-        entry.wanted = model; entry.failures = 0; entry.retryAt = 0;
+    let account;try{account=api.accounts?.scope?.();}catch{return;}
+    if(!account)return;
+    if(writeScope&&account!==writeScope){halt();return;}
+    writeScope=account;
+    const id=idFromHref(location.href);if(!id)return;
+    const probe=window.__MODEL_PROBE__;let probeName=null,internal=null;
+    // This is the probe's matched conversation cache, never an inspector/DOM display label.
+    try{probeName=normalizeModel(probe?.conversationModels?.()?.[id]);}catch{}
+    try{
+      const observed=api.reasoningInspector?.modelIdentity?.();
+      if(observed?.source==='reasoning-inspector'&&validId(observed.sessionId)===id)internal=normalizeModel(observed.model);
+    }catch{ /* The independent probe remains usable if internal-name inspection is unavailable. */ }
+    let model=internal||probeName;
+    if(internal&&probeName){
+      if(internal===probeName)model=internal;
+      else {
+        try{model=typeof probe?.resolveModelName==='function'?probe.resolveModelName(internal,probeName):null;}catch{model=null;}
       }
+    }
+    model=normalizeModel(model);if(!model)return; // Never truncate an overlong combined identity.
+    let entry = writes.get(id);
+    if (!entry) {
+      const confirmedName = cache.get(id)?.model === model && cache.get(id)?.until > now() ? model : null;
+      entry = {wanted:model, confirmed:confirmedName, running:false, failures:0, retryAt:0};
+      writes.set(id, entry);
+    } else if (entry.wanted !== model) {
+      entry.wanted = model; entry.failures = 0; entry.retryAt = 0;
     }
   }
   function pumpWrites() {

@@ -1,11 +1,14 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
 const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'tools/userscript-reasoning.js'),'utf8');
+const probeContext=vm.createContext({performance});
+vm.runInContext(fs.readFileSync(path.join(root,'assets/arena-model-probe.inject.js'),'utf8').replace('try { __req("main"); }','try { globalThis.req=__req; }'),probeContext);
+const resolveModelName=probeContext.req('reasoning').resolveModelName;
 const url='https://arena.ai/agent/11111111-1111-1111-1111-111111111111';
 const sid=n=>String(n).repeat(16);
 const call=(id=1,level='high',turn=1)=>({spanId:sid(id),kind:'stream',turn,partial:false,values:{requestModel:'demo'},reasoning:level?[{kind:'effort',level,path:'$.ai.settings.reasoningEffort'}]:[]});
 const detail=(spans=[call()])=>({checkedAt:'2026-09-26T00:00:00Z',spans});
 function load(){let account='account-a',reload=false;const api={accounts:{scope:()=>account,requiresReload:()=>reload}};const run={runId:'run_one',tokenUrl:url,minTurn:0,lastSeenTurn:1,automaticTrace:{url,runId:'run_one',generation:3,detail:detail()}};
- const window={__MODEL_PROBE__:{runState:()=>run,bus:{activeRunId:'run_one',generation:3,evidence:[]}}};const context={window,location:{origin:'https://arena.ai',pathname:new URL(url).pathname},setInterval:()=>1};vm.runInNewContext(source,context)(api);
+ const window={__MODEL_PROBE__:{conversationModels:()=>({[url.split('/').at(-1)]:'demo'}),resolveModelName,runState:()=>run,bus:{activeRunId:'run_one',generation:3,evidence:[]}}};const context={window,location:{origin:'https://arena.ai',pathname:new URL(url).pathname},setInterval:()=>1};vm.runInNewContext(source,context)(api);
  return {api:api.reasoningInspector,run,window,context,account:v=>{account=v;},reload:v=>{reload=v;}};}
 const plain=x=>JSON.parse(JSON.stringify(x));
 test('all seven explicit levels survive, budget and mode are separate',()=>{const {api}=load();for(const level of ['none','minimal','low','medium','high','xhigh','max'])assert.equal(api.analyze(detail([call(1,level)])).calls[0].effort.value,level);
@@ -36,7 +39,7 @@ test('mounted UI is idempotent, escapes model text, preserves evidence expansion
 });
 test('duplicate turn-level usage records are not assigned to the single model call',()=>{const {api}=load(),usage=id=>({spanId:sid(id),kind:'usage',turn:1,partial:false,values:{reasoningTokens:5}});const r=api.analyze(detail([call(),usage(2),usage(3)])).calls[0];assert.equal(r.reasoning.value,null);assert.equal(r.recordCorrelation,'not-attributed');});
 
-test('upload model is the inspected internal name, never request model or suffixed display',()=>{const e=load();assert.equal(e.api.uploadModel(),null);e.run.automaticTrace.detail.spans.push({spanId:sid(2),kind:'usage',turn:1,partial:false,values:{modelName:'internal-high'}});let result=e.api.uploadModel();assert.equal(result.model,'internal-high');assert.equal(result.source,'reasoning-inspector');assert.equal(result.sessionId,'11111111-1111-1111-1111-111111111111');assert.ok(!result.model.includes(' · '));e.run.automaticTrace.detail.spans[0].partial=true;assert.equal(e.api.uploadModel(),null);});
+test('compatibility upload helper uses probe fallback or internal-probe, never effort decoration',()=>{const e=load();assert.equal(e.api.uploadModel().model,'demo');e.run.automaticTrace.detail.spans.push({spanId:sid(2),kind:'usage',turn:1,partial:false,values:{modelName:'internal-high'}});let result=e.api.uploadModel();assert.equal(result.model,'internal-high-demo');assert.equal(result.source,'reasoning-inspector');assert.equal(result.sessionId,'11111111-1111-1111-1111-111111111111');assert.ok(!result.model.includes(' · '));e.run.automaticTrace.detail.spans[0].partial=true;assert.equal(e.api.uploadModel(),null);});
 test('ambiguous internal names, multiple calls and stale scopes never upload',()=>{for(const change of [e=>e.run.automaticTrace.detail.spans.push(call(3,'low')),e=>e.run.automaticTrace.detail.spans.push({spanId:sid(3),kind:'cost',turn:1,partial:false,values:{modelName:'different'}}),e=>e.account(null),e=>e.window.__MODEL_PROBE__.bus.generation++]){const e=load();e.run.automaticTrace.detail.spans.push({spanId:sid(2),kind:'usage',turn:1,partial:false,values:{modelName:'internal-high'}});change(e);assert.equal(e.api.uploadModel(),null);}});
 test('HUD remount moves the same inspection DOM with expanded sources preserved',()=>{
  class Element{constructor(tag){this.tag=tag;this.children=[];this.style={};this.dataset={};this.isConnected=true;this.textContent='';}append(node){if(node.parent)node.parent.children=node.parent.children.filter(x=>x!==node);this.children.push(node);node.parent=this;}replaceChildren(){this.children=[];}setAttribute(){}querySelectorAll(){return all(this).filter(x=>x.tag==='details'&&x.open);}}

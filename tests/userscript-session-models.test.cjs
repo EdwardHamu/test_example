@@ -37,7 +37,7 @@ function fixture({rows = [], models = {}, grant = true} = {}) {
   const helper = vm.createContext({window:helperWindow,document,CustomEvent,
     location:{origin:'https://arena.ai'},GM_xmlhttpRequest:gm});
   if(grant) vm.runInContext(helperSource,helper);
-  const api = {reasoningInspector:{uploadModel:()=>{const id=context.location.pathname.split('/')[2];return models[id]?{sessionId:id,model:models[id],source:'reasoning-inspector'}:null;}},accounts:{epoch:()=>epoch,requiresReload:()=>reloadRequired}};
+  const api = {reasoningInspector:{modelIdentity:()=>null},accounts:{scope:()=> 'synthetic-account',epoch:()=>epoch,requiresReload:()=>reloadRequired}};
   const context = vm.createContext({window,document,URL,MutationObserver,
     location:{hostname:'arena.ai',origin:'https://arena.ai',href:'https://arena.ai/agent/'+A,pathname:'/agent/'+A},
     CustomEvent,Date:{now:()=>time},
@@ -199,7 +199,7 @@ test('generated userscript contains no old rename action, and privileged host sc
   const helper=fs.readFileSync(path.join(root,'userscript-build/session-model-transport.candidate.js'),'utf8');
   assert.match(built,/@grant\s+none/);assert.doesNotMatch(built,/@connect\s+meamoe\.top/);
   assert.match(helper,/@grant\s+GM_xmlhttpRequest/);assert.match(helper,/@connect\s+meamoe\.top/);
-  assert.match(built,/@version\s+2026\.09\.26\.6/);
+  const buildVersion=JSON.parse(fs.readFileSync(path.join(root,'userscript-build/manifest.json'),'utf8')).version;assert.match(buildVersion,/^\d{4}\.\d{2}\.\d{2}\.\d+$/);assert.equal(built.match(/^\/\/ @version\s+(\S+)/m)?.[1],buildVersion);assert.equal(helper.match(/^\/\/ @version\s+(\S+)/m)?.[1],buildVersion);
   assert.doesNotMatch(built,/hitRename|renameMenuClick|renameFill|renameSave|renameDialog/);
   assert.doesNotMatch(helper,/@connect\s+\*/);
   assert.ok(built.includes(source.trim()));
@@ -208,9 +208,28 @@ test('generated userscript contains no old rename action, and privileged host sc
 test('current session GET is independent of sidebar presence',async()=>{const h=fixture();assert.equal(h.requests.length,1);assert.equal(h.requests[0].url,'https://meamoe.top/koa/session_model/'+A);answer(h.requests[0],A,'Internal A');await flush();assert.equal(h.api.sessionModels.status().currentModel,'Internal A');const a=link(A,'Native');h.rows.push(a);h.mutate();assert.equal(a.title.textContent,'Internal A');assert.equal(h.requests.length,1);});
 test('route switches GET the current conversation even inside positive cache TTL',async()=>{const a=link(A,'A'),h=fixture({rows:[a]});answer(h.requests[0],A,'Internal A');await flush();h.context.location.href='https://arena.ai/agent/'+B;h.context.location.pathname='/agent/'+B;h.emit('popstate');assert.equal(h.requests.at(-1).url,'https://meamoe.top/koa/session_model/'+B);answer(h.requests.at(-1),B,'Internal B');await flush();h.context.location.href='https://arena.ai/agent/'+A;h.context.location.pathname='/agent/'+A;h.tick();assert.equal(h.requests.length,3);answer(h.requests.at(-1),A,'Refreshed A');await flush();assert.equal(a.title.textContent,'Refreshed A');});
 test('route change does not paint the previous response into the current row',async()=>{const a=link(A,'Native A'),b=link(B,'Native B'),h=fixture({rows:[a]});h.context.location.href='https://arena.ai/agent/'+B;h.context.location.pathname='/agent/'+B;h.rows.push(b);h.tick();answer(h.requests.find(r=>r.url.endsWith('/'+A)),A,'Server A');await flush();assert.equal(b.title.textContent,'Native B');answer(h.requests.find(r=>r.url.endsWith('/'+B)),B,'Server B');await flush();assert.equal(b.title.textContent,'Server B');});
-test('display-name history alone is never uploaded',()=>{const h=fixture();h.window.__MODEL_PROBE__.conversationModels=()=>({[A]:'display-name-high'});h.tick();assert.equal(h.requests.filter(r=>r.method==='POST').length,0);});
-test('only inspector internal name is uploaded, without effort decoration',()=>{const h=fixture({models:{[A]:'internal-provider-model-high'}});h.window.__MODEL_PROBE__.conversationModels=()=>({[A]:'Friendly Model · high'});h.tick();const posts=h.requests.filter(r=>r.method==='POST');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].data).model,'internal-provider-model-high');});
-test('inspector record for another route or from an unapproved source is not uploaded',()=>{for(const record of [{sessionId:B,model:'wrong',source:'reasoning-inspector'},{sessionId:A,model:'wrong',source:'display'}]){const h=fixture();h.api.reasoningInspector.uploadModel=()=>record;h.tick();assert.equal(h.requests.filter(r=>r.method==='POST').length,0);}});
+test('matched current probe name can synchronize before an internal name is available',()=>{const h=fixture();h.window.__MODEL_PROBE__.conversationModels=()=>({[A]:'probe-name-high'});h.tick();const posts=h.requests.filter(r=>r.method==='POST');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].data).model,'probe-name-high');});
+test('internal-only records keep their intrinsic suffix without appending effort',()=>{const h=fixture();h.api.reasoningInspector.modelIdentity=()=>({sessionId:A,model:'internal-provider-model-high',source:'reasoning-inspector'});h.tick();const posts=h.requests.filter(r=>r.method==='POST');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].data).model,'internal-provider-model-high');});
+test('inspector record for another route or from an unapproved source is not uploaded',()=>{for(const record of [{sessionId:B,model:'wrong',source:'reasoning-inspector'},{sessionId:A,model:'wrong',source:'display'}]){const h=fixture();h.api.reasoningInspector.modelIdentity=()=>record;h.tick();assert.equal(h.requests.filter(r=>r.method==='POST').length,0);}});
 test('direct title span fallback is repainted without replacing anchor or icon',async()=>{const a=link(A,'Original');a.querySelector=q=>q===':scope > span.truncate'?a.title:null;const h=fixture({rows:[a]});answer(h.requests[0],A,'Internal A');await flush();assert.equal(a.title.textContent,'Internal A');assert.equal(a.href,'/agent/'+A);});
 
 test('desktop and mobile sidebar copies are both painted without duplicate lookups',async()=>{const a=link(A,'Desktop'),b=link(A,'Mobile'),h=fixture({rows:[a]});h.document.querySelectorAll=()=>[{querySelectorAll:()=>[a]},{querySelectorAll:()=>[b]}];h.tick();answer(h.requests[0],A,'Internal');await flush();assert.equal(a.title.textContent,'Internal');assert.equal(b.title.textContent,'Internal');assert.equal(h.requests.length,1);});
+
+
+for(const [internal,display,expected] of [[null,'Public model','Public model'],['Same model','Same model','Same model'],['internal-route','Public model','internal-route-Public model']])
+ test('real inspector naming crosses the fixed transport bridge: '+expected,async()=>{
+  const a=link(A,'Original title'),h=fixture({rows:[a]});h.models[A]=display;
+  const pctx=vm.createContext({performance});
+  vm.runInContext(fs.readFileSync(path.join(root,'assets/arena-model-probe.inject.js'),'utf8').replace('try { __req("main"); }','try { globalThis.req=__req; }'),pctx);
+  const spans=[{spanId:'a'.repeat(16),kind:'stream',turn:1,partial:false,values:{requestModel:'Inspector-only label'},reasoning:[{kind:'effort',level:'high'}]}];
+  if(internal)spans.push({spanId:'b'.repeat(16),kind:'usage',turn:1,partial:false,values:{modelName:internal}});
+  const run={runId:'run_sync_names',tokenUrl:h.context.location.href,minTurn:0,lastSeenTurn:1,
+   automaticTrace:{runId:'run_sync_names',url:h.context.location.href,generation:1,detail:{spans},summary:{latestCall:null}}};
+  Object.assign(h.window.__MODEL_PROBE__,{resolveModelName:pctx.req('reasoning').resolveModelName,runState:()=>run,bus:{activeRunId:run.runId,generation:1,evidence:[]}});
+  h.api.accounts.scope=()=> 'synthetic-account';
+  vm.runInContext(fs.readFileSync(path.join(root,'tools/userscript-reasoning.js'),'utf8'),h.context)(h.api);
+  h.tick();const posts=h.requests.filter(r=>r.method==='POST');assert.equal(posts.length,1);assert.equal(JSON.parse(posts[0].data).model,expected);
+  assert.equal(posts[0].url,'https://meamoe.top/koa/session_model');assert.equal(a.title.textContent,'Original title');
+  answer(posts[0],A,expected);await flush();assert.equal(a.title.textContent,expected);
+  spans[0].reasoning[0].level='low';h.tick();assert.equal(h.requests.filter(r=>r.method==='POST').length,1,'changing effort must not rewrite the model name');
+ });

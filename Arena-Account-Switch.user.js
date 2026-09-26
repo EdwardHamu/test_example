@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      2.0.4
+// @version      2.0.5
 // @description  服务端账号保险库：账号、Cookie、可选密码、额度和快捷键远程存储，按需读取与安全切换
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -23,7 +23,7 @@
 
 (function arenaAccountSwitch() {
   'use strict';
-  const VERSION = '2.0.4';
+  const VERSION = '2.0.5';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
@@ -229,6 +229,15 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     REVISION_CONFLICT: '服务端记录已更新，请刷新后重试；不会覆盖其他设备的数据', LEASE_BUSY: '其他标签页或设备正在操作该账号，请稍后重试',
     LOCAL_LOCK_BUSY: '另一个标签页正在操作登录 Cookie，请稍候', COOKIE_PERMISSION: '需要 Tampermonkey 的 Cookie 读写权限',
     LOCAL_LOCK_UNAVAILABLE: '浏览器缺少跨标签页 Web Locks 支持，已禁止修改登录 Cookie',
+    COOKIE_READ_FAILED: '读取完整 Cookie 失败，已停止后续写入（COOKIE_READ_FAILED）',
+    COOKIE_SET_FAILED: 'Cookie 写入失败：浏览器拒绝了属性或扩展权限，未完成切换（COOKIE_SET_FAILED）',
+    COOKIE_DELETE_FAILED: 'Cookie 清理失败，请检查扩展的站点和 Cookie 权限（COOKIE_DELETE_FAILED）',
+    COOKIE_TIMEOUT: 'Cookie API 响应超时，已停止后续步骤；请刷新并核对当前登录账号（COOKIE_TIMEOUT）',
+    COOKIE_WRITE_FAILED: 'Cookie 写入后的核对未通过，未确认切换成功（COOKIE_WRITE_FAILED）',
+    COOKIE_DATA_UNUSABLE: '服务端凭据不是可还原的 Cookie 数据，请重新登录目标账号并保存会话（COOKIE_DATA_UNUSABLE）',
+    COOKIE_HTTPONLY_UNAVAILABLE: 'Tampermonkey 不允许访问 HttpOnly Cookie；请授权或使用支持该能力的 Beta 版并刷新（COOKIE_HTTPONLY_UNAVAILABLE）',
+    VERIFY_UNAVAILABLE: '无法通过 Arena 核验登录身份，请检查 Arena 网络连接后重试（VERIFY_UNAVAILABLE）',
+    REQUEST_ABORTED: '账号服务器请求已取消，未完成操作', LEASE_EXPIRED: '账号操作租约已失效，请刷新后重试',
     SESSION_CONFLICT: '当前浏览器与服务端会话不同，未自动覆盖；如确认使用本机会话，请点“保存当前会话”',
     NETWORK_ERROR: '无法连接账号服务器（网络错误）', TIMEOUT: '账号服务器请求超时', CONNECTION_CHANGED: '连接配置已改变，操作已取消',
     UNSUPPORTED_MANAGER: '安全连接需要 Tampermonkey 5.4 或以上版本（支持禁止请求重定向）',
@@ -238,7 +247,7 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     MIGRATION_CONFLICT: '服务端已有不同数据，未覆盖；请核对，旧库已保留',
     INVALID_SERVER_RESPONSE: '服务端响应不完整，未将本次操作视为成功',
     ROLLBACK_FAILED: '恢复原 Cookie 失败，请暂停操作并检查 Cookie 权限；可能需要在 Arena 重新登录'
-  }[e?.code] || (e?.status ? '账号服务器操作失败（HTTP ' + e.status + (typeof e.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(e.code)?'，'+e.code:'') + '）' : '操作失败，请检查连接与 Cookie 权限'));
+  }[e?.code] || (e?.status ? '账号服务器操作失败（HTTP ' + e.status + (typeof e.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(e.code)?'，'+e.code:'') + '）' : '操作未完成（客户端异常），请更新脚本并刷新后重试'));
   function gmTransport(request) {
     return new Promise((resolve, reject) => {
       const info = typeof GM_info !== 'undefined' ? GM_info : {};
@@ -746,17 +755,62 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
   }
 
   // ---------------- Cookie ----------------
-  const gmCookie = typeof GM_cookie !== 'undefined' ? GM_cookie : null;
-  function listCookies() {
-    return new Promise(resolve=>{
-      let finished=false;
-      const finish=(cookies,error)=>{if(finished)return;finished=true;clearTimeout(timer);
-        if(error||!Array.isArray(cookies)){cookieMode='gm-error';lastError='Cookie API 读取失败';resolve(docCookies());}
-        else{cookieMode='gm';resolve(cookies);}};
-      const timer=setTimeout(()=>finish(null,true),7000);
-      if(gmCookie?.list){try{gmCookie.list({domain:location.hostname||location.host},finish);}catch{finish(null,true);}}
-      else{clearTimeout(timer);finished=true;cookieMode='document';resolve(docCookies());}
+  const cookieError = code => Object.assign(new Error(code), { code });
+  function cookieApi(method) {
+    const legacy = typeof GM_cookie !== 'undefined' ? GM_cookie : null;
+    if (typeof legacy?.[method] === 'function') return { api:legacy, promise:false };
+    const modern = typeof GM !== 'undefined' ? GM?.cookie : null;
+    if (typeof modern?.[method] === 'function') return { api:modern, promise:true };
+    return null;
+  }
+  function cookieFailure(method, error) {
+    // Browser errors may contain Cookie values. Classify in memory, never expose the raw error.
+    let message = '';
+    try { message = typeof error === 'string' ? error : typeof error?.message === 'string' ? error.message : ''; } catch { /* Unreadable extension error objects are not surfaced. */ }
+    if (/http.?only/i.test(message) && /beta|unsupported|not.?support|denied|not.?allowed|not.?permitted|disabled/i.test(message)) return cookieError('COOKIE_HTTPONLY_UNAVAILABLE');
+    if (/permission|access[^.]{0,60}(?:denied|disabled)|not permitted/i.test(message)) return cookieError('COOKIE_PERMISSION');
+    return cookieError(({list:'COOKIE_READ_FAILED',set:'COOKIE_SET_FAILED',delete:'COOKIE_DELETE_FAILED'})[method] || 'COOKIE_PERMISSION');
+  }
+  function cookieCall(method, details) {
+    return new Promise((resolve, reject) => {
+      const selected = cookieApi(method);
+      if (!selected) { reject(cookieError('COOKIE_PERMISSION')); return; }
+      let finished = false;
+      const finish = (value, error) => {
+        if (finished) return;
+        finished = true; clearTimeout(timer);
+        if (error) reject(cookieFailure(method, error));
+        else if (method === 'list' && !Array.isArray(value)) reject(cookieError('COOKIE_READ_FAILED'));
+        else resolve(method === 'list' ? value : null);
+      };
+      const timer = setTimeout(() => {
+        if (finished) return;
+        finished = true; reject(cookieError('COOKIE_TIMEOUT'));
+      }, 7000);
+      try {
+        const callback = method === 'list' ? (cookies,error) => finish(cookies,error) : error => finish(null,error);
+        // GM.cookie is Promise based. Some managers also return Promises from GM_cookie.
+        // Do not retry a mutation through another API if the chosen method rejects.
+        const result = selected.promise ? selected.api[method](details) : selected.api[method](details,callback);
+        if (result && typeof result.then === 'function') Promise.resolve(result).then(value => finish(value), error => finish(null,error || true));
+      } catch (error) { finish(null,error || true); }
     });
+  }
+  function assertCookieArray(cookies) {
+    // Structural preflight only, not a Cookie policy/name/domain whitelist.
+    if (!Array.isArray(cookies) || cookies.some(c => !c || typeof c !== 'object' || typeof c.name !== 'string' || typeof c.value !== 'string'
+      || c.domain != null && typeof c.domain !== 'string' || c.path != null && typeof c.path !== 'string')) throw cookieError('COOKIE_DATA_UNUSABLE');
+  }
+  async function listCookies({ required = false } = {}) {
+    try {
+      const cookies = await cookieCall('list', {domain:location.hostname || location.host});
+      assertCookieArray(cookies); cookieMode = 'gm'; return cookies;
+    } catch (error) {
+      cookieMode = cookieApi('list') ? 'gm-error' : 'document'; lastError = errorText(error);
+      if (required) throw error;
+      // Read-only UI detection may fall back; replacements and verification never do.
+      try { return docCookies(); } catch { return []; }
+    }
   }
   function docCookies() {
     const out = [];
@@ -765,22 +819,31 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     return out;
   }
   const authOf = cookies => cookies.filter(c => AUTH_RE.test(c.name)).sort((a, b) => (+(a.name.split('.')[1] || -1)) - (+(b.name.split('.')[1] || -1)));
-  function cookieCall(method, details) {
-    return new Promise((resolve,reject)=>{
-      if(!gmCookie?.[method]){reject(Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'}));return;}
-      const timer=setTimeout(()=>reject(Object.assign(new Error('COOKIE_TIMEOUT'),{code:'COOKIE_TIMEOUT'})),7000);
-      try{gmCookie[method](details,error=>{clearTimeout(timer);if(error)reject(Object.assign(new Error('COOKIE_OPERATION_FAILED'),{code:'COOKIE_OPERATION_FAILED'}));else resolve(null);});}
-      catch{clearTimeout(timer);reject(Object.assign(new Error('COOKIE_OPERATION_FAILED'),{code:'COOKIE_OPERATION_FAILED'}));}
-    });
-  }
   function delCookie(c) { return cookieCall('delete',{url:ORIGIN+(c.path||'/'),name:c.name}); }
-  function setCookie(c) {
+  function cookieSetDetails(c) {
+    assertCookieArray([c]);
     const d={url:ORIGIN+(c.path||'/'),name:c.name,value:c.value,path:c.path||'/',secure:c.secure!==false,httpOnly:!!c.httpOnly};
-    if(!c.hostOnly&&c.domain)d.domain=c.domain;
+    // Omit Domain for current-host __Host- Cookies, even if a legacy snapshot omitted hostOnly.
+    // A foreign scope is still passed to browser validation, never silently moved to this host.
+    const hostPrefix=c.name.startsWith('__Host-')&&(!c.domain||c.domain.replace(/^\./,'').toLowerCase()===(location.hostname||location.host).toLowerCase());
+    if(!c.hostOnly&&!hostPrefix&&c.domain)d.domain=c.domain;
     if(!c.session&&Number.isFinite(c.expirationDate))d.expirationDate=c.expirationDate;
-    if(/^(lax|strict|no_restriction)$/i.test(c.sameSite||''))d.sameSite=c.sameSite.toLowerCase();
-    if(c.sameSite==='none')d.sameSite='no_restriction';
-    return cookieCall('set',d);
+    const sameSite=typeof c.sameSite==='string'?c.sameSite.toLowerCase():'';
+    if(/^(lax|strict|no_restriction)$/.test(sameSite))d.sameSite=sameSite;
+    if(sameSite==='none')d.sameSite='no_restriction';
+    return d;
+  }
+  function setCookie(c) { return cookieCall('set',cookieSetDetails(c)); }
+  function cookieReadbackMatches(actual, expected, previous) {
+    const scope=c=>JSON.stringify([c.domain?.replace(/^\./,'')||'arena.ai',c.path||'/',c.name]);
+    const key=c=>JSON.stringify([scope(c),c.value]);
+    const oldScopes=new Set(previous.map(scope));
+    const remaining=new Map();
+    for(const c of actual){const k=key(c);remaining.set(k,(remaining.get(k)||0)+1);}
+    for(const c of expected){const k=key(c),count=remaining.get(k)||0;if(!count)return false;remaining.set(k,count-1);}
+    // Other page code may create unrelated Cookies while we switch. Never ignore leftover
+    // login tokens/fragments, leftover old-account Cookies, or a missing/changed target Cookie.
+    return !actual.some(c=>(AUTH_RE.test(c.name)||oldScopes.has(scope(c)))&&(remaining.get(key(c))||0)>0);
   }
 
   // ---------------- 身份 ----------------
@@ -884,12 +947,17 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     const v2 = judge(await meNow());
     return v2 === null ? v : v2;
   }
-  async function replaceAuth(cookies) {
-    if (!gmCookie?.list || !gmCookie?.set || !gmCookie?.delete || cookieMode !== 'gm') throw Object.assign(new Error('COOKIE_PERMISSION'), { code:'COOKIE_PERMISSION' });
-    for (const c of await listCookies()) await delCookie(c);
-    for (const c of cookies) { const error = await setCookie(c); if (error) throw Object.assign(new Error('COOKIE_WRITE_FAILED'), { code:'COOKIE_WRITE_FAILED' }); }
-    const expected = cookies.filter(c => !Number.isFinite(c.expirationDate) || c.expirationDate > Date.now()/1000);
-    if (await vault.digest(await listCookies()) !== await vault.digest(expected)) throw Object.assign(new Error('COOKIE_WRITE_FAILED'), { code:'COOKIE_WRITE_FAILED' });
+  async function replaceAuth(cookies, onMutation = () => {}) {
+    if (['list','set','delete'].some(method => !cookieApi(method))) throw cookieError('COOKIE_PERMISSION');
+    assertCookieArray(cookies);
+    const writes=cookies.map(cookieSetDetails); // Prepare the whole target before the first deletion.
+    const existing=await listCookies({required:true});
+    for (const c of existing) { onMutation(); await delCookie(c); }
+    for (const details of writes) { onMutation(); await cookieCall('set',details); }
+    // Compare against the expiry actually submitted to the API; session Cookies have none.
+    const expected=cookies.filter((c,i)=>!Number.isFinite(writes[i].expirationDate)||writes[i].expirationDate>Date.now()/1000);
+    const actual=await listCookies({required:true});
+    if (!cookieReadbackMatches(actual,expected,existing)) throw cookieError('COOKIE_WRITE_FAILED');
   }
   async function rollbackAuth(before) {
     try { await replaceAuth(before); } catch { throw Object.assign(new Error('ROLLBACK_FAILED'), { code:'ROLLBACK_FAILED' }); }
@@ -902,8 +970,7 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
   async function switchTo0(target) {
     if (!await ensureConnected()) return false;
     await refreshAccounts();
-    const before=await listCookies();
-    if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
+    const before=await listCookies({required:true});
     const curSession=decodeSession(before);currentId=!curSession.anonymous&&curSession.email?emailKey(curSession):null;
     let cur=find(currentId);
     if(currentId&&!cur){
@@ -920,15 +987,16 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
       // Remote reads, revision and account identity checks happen BEFORE deleting browser Cookies.
       const secret=await lease.read();remote=await vault.get(remote.id);
       if(secret.credentialRevision!==remote.credentialRevision)throw Object.assign(new Error('REVISION_CONFLICT'),{code:'REVISION_CONFLICT',status:412});
+      assertCookieArray(secret?.bundle?.cookies);
       const identity=decodeSession(secret.bundle.cookies);
       if(identity.anonymous || identity.email && emailKey(identity)!==emailKey(remote))throw Object.assign(new Error('CREDENTIAL_IDENTITY_MISMATCH'),{code:'CREDENTIAL_IDENTITY_MISMATCH'});
       const targetMirror=await vault.readMirror(remote);
       let changed=false;
       try {
-        lease.guard();changed=true;await replaceAuth(secret.bundle.cookies);
+        lease.guard();await replaceAuth(secret.bundle.cookies,()=>{lease.guard();changed=true;});
         const verified=await verifySession({email:remote.email,id:remote.providerUserId});
         if(verified!==true){await rollbackAuth(before);changed=false;invalid=verified===false;if(!invalid)throw Object.assign(new Error('VERIFY_UNAVAILABLE'),{code:'VERIFY_UNAVAILABLE'});return;}
-        const fresh=await listCookies();lease.guard();
+        const fresh=await listCookies({required:true});lease.guard();
         const result=await lease.write(secret.credentialRevision,vault.bundle(fresh,decodeSession(fresh).exp));
         syncedCredentials.set(remote.id,{hash:await vault.digest(fresh),revision:result.credentialRevision});
         remote=await patchProfile(vault.find(remote.id),{email:remote.email},'ready');target=mergeRemoteMirror(toUI(remote),targetMirror);
@@ -950,8 +1018,8 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
   async function switchTo(target){
     if(switchingNow||suppressSync){toast('正在操作登录 Cookie，请稍候');return false;}
     switchingNow=true;suppressSync=true;
-    try {return await withBrowserLock(()=>switchTo0(target));}
-    catch(e){toast(errorText(e));return false;}
+    try {const result=await withBrowserLock(()=>switchTo0(target));if(result)lastError='';return result;}
+    catch(e){lastError=errorText(e);toast(lastError);return false;}
     finally{switchingNow=false;suppressSync=false;}
   }
   async function addAccount(){
@@ -969,8 +1037,7 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     if(!confirm('前往 Arena 官方登录。请确认当前账号的会话已保存到服务端；继续会清除当前登录 Cookie。'))return;
     suppressSync=true;
     try{await withBrowserLock(async()=>{
-      await listCookies();if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
-      const before=await listCookies();const carried=carryOut();
+      const before=await listCookies({required:true});const carried=carryOut();
       try{if(cur){await syncCurrent({locked:true,force:true});await mirrorOut(cur);}await replaceAuth([]);}
       catch(e){await rollbackAuth(before);throw e;}
       bypassLogin=true;restoreLogin();mirrorIn(null);markDirty();carryArm(carried);pending(true);location.href=ORIGIN+'/agent';
@@ -980,8 +1047,7 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
   async function signInEmail(em,pw,opt={}){
     if(!vault.ready())return{error:'请先连接服务端账号库'};
     const execute=async()=>{
-      await refreshAccounts();const before=await listCookies();
-      if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
+      await refreshAccounts();const before=await listCookies({required:true});
       let a=await resolveRecord({email:em},true);let result;
       await vault.withLease(a,async lease=>{
         const oldMirror=await vault.readMirror(a);
@@ -993,7 +1059,7 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
           if(!res.ok||!j?.success){throw Object.assign(new Error('ARENA_LOGIN_FAILED'),{code:'ARENA_LOGIN_FAILED',userMessage:res.status===429?'Arena 登录过于频繁，请稍后再试':j?.requiresVerification?'请先验证邮箱，或改用 Arena 官方登录':'Arena 登录失败，请检查邮箱密码或改用官方登录页'});}
           const verified=await verifySession({email:em,id:a.providerUserId});
           if(verified!==true)throw Object.assign(new Error('VERIFY_UNAVAILABLE'),{code:'VERIFY_UNAVAILABLE'});
-          const cookies=await listCookies(),auth=authOf(cookies),identity=decodeSession(auth);
+          const cookies=await listCookies({required:true}),auth=authOf(cookies),identity=decodeSession(auth);
           if(!auth.length||identity.anonymous||identity.email&&emailKey(identity)!==emailKey({email:em}))throw Object.assign(new Error('CREDENTIAL_IDENTITY_MISMATCH'),{code:'CREDENTIAL_IDENTITY_MISMATCH'});
           opt.stage?.('正在保存到服务端…');lease.guard();a=await vault.get(a.id);
           const saved=await lease.write(a.credentialRevision,vault.bundle(cookies,identity.exp));

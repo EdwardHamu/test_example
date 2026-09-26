@@ -1,6 +1,8 @@
-# Arena Account Switch 2.0.4：服务端存储版
+# Arena Account Switch 2.0.5：服务端存储版
 
 依据 `D:\MCode\pj\lexue_rs\docs\arena-vault-api.md` 对接。用户安装文件仍然只有根目录的 **Arena-Account-Switch.user.js**；无运行时 `@require`，不需要安装 Node/Python 才能使用脚本。
+
+> 2.0.5 修复切换时的 Cookie API 兼容、旧 `__Host-` 快照还原与 Cookie 读回误判；增加分阶段的安全错误提示，保留失败回滚。详见 [Cookie 切换兼容修复](account-switch-cookie-compat-fix.md)。
 
 ## 使用前
 
@@ -52,12 +54,14 @@ https://meamoe.top/koa/arena-vault/connect#key=<你的私有密钥>
 
 1. 获得浏览器 Web Lock，避免本机两标签页同时改 Cookie。当前登录若尚未保存在服务端，会先询问是否保存，取消则不切换。
 2. 保存当前账号必要更新，取得目标账号租约。
-3. **先从服务端获取并校验完整目标 Cookie，再删除当前 Cookie。** 服务端错误/非法 Cookie 不会先清掉当前登录。
+3. **先获取目标凭据，检查 Cookie 数组结构、账号归属和版本，并通过扩展完整读取当前 Cookie，再开始替换。** 前置读取或数据结构失败不清理当前登录；属性是否被浏览器接受仍由 Cookie API 决定，写入失败进入回滚。
 4. 在 Arena `/api/me` 验证真实身份；需要时通过 Arena 原站触发会话刷新。
 5. 验证成功后，把最新 Cookie 按 credentialRevision 写回服务端。成功后切换页面。
 6. Cookie 写失败、验证失败或不确定、服务端提交失败，均尝试恢复切换前 Cookie。恢复也失败时明确报警，不宣称已恢复。
 
 不再把过期 Cookie 的 expirationDate 强行延长 400 天；保留实际过期时间和会话 Cookie 语义。
+
+Cookie 调用同时支持 `GM_cookie` 回调 / Promise 和 `GM.cookie` Promise。写入后的核对要求所有预期 Cookie 存在且值一致，并拒绝残留登录分片或旧账号 Cookie；只允许浏览器额外新建、之前不存在的非登录 Cookie。替换和回滚不会使用 `document.cookie` 作为完整快照。
 
 - 账号、凭据、密码、额度、镜像、设置分别使用 ETag/If-Match。
 - 412 不自动拿新版本覆盖他人修改；用户刷新后再选择操作。

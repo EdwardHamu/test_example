@@ -4,7 +4,15 @@
  'use strict';
  const LEVELS=['none','minimal','low','medium','high','xhigh','max'];
  const count=x=>Number.isSafeInteger(x)&&x>=0?x:null;
- const name=x=>typeof x==='string'&&x.length<=200&&!/[\x00-\x1f\x7f]|Bearer\s|eyJ[\w-]+\.[\w-]+\./i.test(x)?x:null;
+ const name=x=>{
+  if(typeof x!=='string'||/[\x00-\x1f\x7f]|Bearer\s|eyJ[\w-]+\.[\w-]+\./i.test(x))return null;
+  const value=x.trim();return value&&value.length<=200&&!/^(?:unknown|unrecognized|未知|未识别|未提供)$/i.test(value)?value:null;
+ };
+ const modelName=(internal,display)=>{
+  const format=window.__MODEL_PROBE__?.resolveModelName;
+  // Bundled probes supply the shared policy; an older live probe stays readable until refresh.
+  return typeof format==='function'?format(name(internal),name(display)):name(internal)||name(display);
+ };
  const span=x=>typeof x==='string'&&/^[a-f0-9]{16,32}$/i.test(x)?x:null;
  const path=x=>typeof x==='string'&&x.length<=240&&/^\$(?:\.[\w-]{1,80}){1,20}$/.test(x)&&!/(?:^|\.)(?:cookie|cookies|authorization|headers|password|secret|token|signature|messages?|content|text)(?:\.|$)/i.test(x)?x:null;
  function cleanEvidence(items,source) {
@@ -53,10 +61,11 @@
   const single=streams.length===1&&ids.size<=1&&records.filter(s=>s.kind==='usage').length<=1&&records.filter(s=>s.kind==='cost').length<=1;
   const checkedAt=typeof detail?.checkedAt==='string'&&detail.checkedAt.length<=40&&Number.isFinite(Date.parse(detail.checkedAt))?detail.checkedAt:null;
   const calls=streams.map(s=>{
-   const v=s.values||{},request=name(v.requestModel||v.apiModelName||v.apiModelId);
+   const v=s.values||{},request=name(v.apiModelName)||name(v.requestModel)||name(v.apiModelId);
    // Only a single-call turn may consume turn-level usage/model names or page request settings.
    const models=single?[...new Set(records.map(r=>name(r.values?.modelName)).filter(Boolean))]:[];
    const internal=models.length===1?models[0]:null;
+   const internalModelStatus=!single?'unattributed':models.length>1?'conflict':internal?'provided':'missing';
    const readings=[];
    if(count(v.reasoningTokens)!==null)readings.push({source:'Span',path:['ai.usage.reasoningTokens','gen_ai.usage.reasoning_tokens','ai.usage.reasoningTokens / gen_ai.usage.reasoning_tokens'].includes(v.reasoningSource)?v.reasoningSource:'ai.usage.reasoningTokens',value:v.reasoningTokens});
    for(const key of ['anthropic.usage.output_tokens_details.thinking_tokens','vertex.usageMetadata.thoughtsTokenCount','google.usageMetadata.thoughtsTokenCount']){
@@ -64,7 +73,7 @@
    }
    if(single)for(const r of records.filter(r=>r.kind==='usage'))if(count(r.values?.reasoningTokens)!==null)readings.push({source:'用量记录',path:'token.usage.recorded.reasoningTokens',value:r.values.reasoningTokens});
    const evidence=[...cleanEvidence(s.reasoning,'Span'),...(single?cleanEvidence(requestEvidence,'页面请求'):[])];
-   return {spanId:s.spanId,requestModel:request,responseModel:name(v.responseModel||v.genResponseModel),internalModel:internal,
+   return {spanId:s.spanId,requestModel:request,responseModel:name(v.responseModel||v.genResponseModel),internalModel:internal,internalModelStatus,
     internalHint:hint(internal,request),effort:effort(evidence),reasoning:reported(readings,v.reasoningConflict===true),
     partial:s.partial!==false||!!detail.limited||!!detail.stopped,recordCorrelation:single?'single-call':'not-attributed'};
   });
@@ -90,11 +99,27 @@
    return {state:'ready',note:value.multi?'本轮有多次模型调用，逐条展示；不把轮次级记录归给某一次调用。':'仅表示接口提供的配置证据，不证明模型内部的实际计算量。',...value};
   } catch { return empty('error','思考等级暂不可用；未输出原始响应或账号凭据。'); }
  }
- function uploadModel(){
+ function checkedModelCall(){
   const value=snapshot();if(value.state!=='ready'||value.partial)return null;
-  const selected=value.multi?value.calls.find(c=>c.spanId===value.latestCall?.spanId):value.calls[0];
-  if(!selected||selected.partial||!selected.internalModel)return null;
-  return {sessionId:location.pathname.split('/')[2]?.toLowerCase(),model:selected.internalModel,source:'reasoning-inspector',spanId:selected.spanId};
+  const latest=value.latestCall;
+  if(latest&&(latest.partial!==false||!(value.multi?['start-time','trace-order']:['single-call','start-time','trace-order']).includes(latest.order)))return null;
+  const selected=latest?value.calls.find(c=>c.spanId===latest.spanId):value.multi?null:value.calls[0];
+  return !selected||selected.partial||selected.internalModelStatus==='conflict'?null:selected;
+ }
+ function modelIdentity(){
+  const selected=checkedModelCall(),model=name(selected?.internalModel);
+  if(!model)return null;
+  return {sessionId:location.pathname.split('/')[2]?.toLowerCase(),model,source:'reasoning-inspector',spanId:selected.spanId};
+ }
+ // Compatibility helper for completed inspected calls. The sync module independently obtains
+ // the probe name and uses modelIdentity only for an optional, scoped internal model name.
+ function uploadModel(){
+  const selected=checkedModelCall();if(!selected)return null;
+  const sessionId=location.pathname.split('/')[2]?.toLowerCase();let probeName=null;
+  try{probeName=name(window.__MODEL_PROBE__?.conversationModels?.()?.[sessionId]);}catch{}
+  const model=modelName(selected.internalModel,probeName);
+  if(!model||model.length>200)return null;
+  return {sessionId,model,source:'reasoning-inspector',spanId:selected.spanId};
  }
  function mountHud(){const parent=typeof document!=='undefined'?document.getElementById?.('amp-hud')?.shadowRoot?.querySelector('[data-reasoning-inspector]'):null;if(parent)mount(parent);}
  function el(tag,text,parent){const node=document.createElement(tag);node.textContent=text;parent.append(node);return node;}
@@ -102,19 +127,20 @@
   if(!container)return;
   const open=new Set(Array.from(container.querySelectorAll('details[open]')).map(d=>d.dataset.span));
   container.replaceChildren();el('h3','思考等级检查',container);el('p',value.note,container);
-  const sync=api.sessionModels?.status?.();if(sync)el('p','会话模型同步：'+(sync.lastError|| (sync.currentModel?'服务器记录：'+sync.currentModel:sync.transport?'已连接，等待内部名或服务器记录':'跨域助手未就绪')),container);
+  const sync=api.sessionModels?.status?.();if(sync)el('p','会话模型同步：'+(sync.lastError|| (sync.currentModel?'服务器记录：'+sync.currentModel:sync.transport?'已连接，等待模型名称或服务器记录':'跨域助手未就绪')),container);
   if(value.state!=='ready')return;
   el('p','第 '+value.turn+' 轮 · '+value.calls.length+' 次模型调用'+(value.partial?' · 部分记录':''),container);
   for(const c of value.calls){
    const card=el('div','',container);card.style.cssText='border:1px solid #52617a;border-radius:7px;padding:9px;margin:8px 0';
    const titleTier=value.latestCall?.spanId===c.spanId&&value.latestCall.partial?'未知':c.effort.status==='explicit'&&LEVELS.includes(c.effort.value)?c.effort.value:c.effort.status==='conflict'?'冲突':c.effort.status==='unsupported'?'不支持':'未知';
-   el('strong',(c.requestModel||c.internalModel||'型号未提供')+' · '+titleTier,card);
+   el('strong',(modelName(c.internalModel,c.requestModel)||'型号未提供')+' · '+titleTier,card);
    if(value.latestCall?.spanId===c.spanId)el('p','最新调用 · '+(value.latestCall.order==='start-time'?'按开始时间':'按 Trace 顺序')+(c.partial?' · 尚未完成':''),card);
    const e=c.effort,level=e.value||({conflict:'冲突：'+e.levels.join(' / '),unsupported:'不支持的字段值'}[e.status])||'未知（没有显式配置）';
    el('p','显式思考等级：'+level,card);
    if(c.partial)el('p','当前调用记录不完整，字段可能继续更新。',card);
    el('p','内部名称后缀：'+(c.internalHint.value||'—')+' · '+c.internalHint.status,card);
    if(c.internalModel)el('p','内部名称：'+c.internalModel,card);
+   if(c.internalModelStatus==='conflict')el('p','内部名称存在冲突，不采用本次内部名；已有探针名仍可独立同步。',card);
    if(e.budgets.length)el('p','思考预算：'+e.budgets.map(v=>v===-1?'自动 (-1)':v===0?'关闭 (0)':v+' tokens').join(' / '),card);
    if(e.modes.length)el('p','思考模式：'+e.modes.join(' / '),card);
    el('p','推理 Token：'+(c.reasoning.status==='conflict'?'冲突':c.reasoning.value===null?'未提供':String(c.reasoning.value))+'（用量，不是档位）',card);
@@ -131,6 +157,6 @@
   mountedParent=parent;container=el('section','',parent);container.setAttribute('aria-label','思考等级检查');last='';refresh();
   if(timer===null)timer=setInterval(refresh,1000);
  }
- api.reasoningInspector={snapshot,refresh,mount,mountHud,uploadModel,analyze,effort,hint,reported};
+ api.reasoningInspector={snapshot,refresh,mount,mountHud,modelIdentity,uploadModel,analyze,effort,hint,reported};
  if(typeof document!=='undefined'){if(timer===null)timer=setInterval(refresh,1000);mountHud();}
 })

@@ -1,17 +1,17 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const{fixture,cookie,bundle,clone,webcrypto}=require('./account-vault-fixture.cjs');
-const bundlePath=fs.existsSync(path.join(__dirname,'../Arena-Account-Switch.user.js'))?path.join(__dirname,'../Arena-Account-Switch.user.js'):path.join(__dirname,'Arena-Account-Switch.user.js');
+const bundlePath=process.env.ARENA_ACCOUNT_SWITCH_BUNDLE||(fs.existsSync(path.join(__dirname,'../Arena-Account-Switch.user.js'))?path.join(__dirname,'../Arena-Account-Switch.user.js'):path.join(__dirname,'Arena-Account-Switch.user.js'));
 const source=fs.readFileSync(bundlePath,'utf8');
 function env(options={}) {
  const server=fixture(),trace=[],gmWrites=[],gmDeleted=[],gm=new Map(),ls=new Map(),session=new Map(),timers=[],notices=[];
- let jar=clone(options.cookies===undefined?[cookie('current@example.com')]:options.cookies), failSet=options.failSet||null;
+ let jar=clone(options.cookies===undefined?[cookie('current@example.com')]:options.cookies), failSet=options.failSet||null, listCount=0;
  const answers=[...(options.confirm||[])];
  const storage=map=>({getItem:k=>map.get(k)??null,setItem:(k,v)=>map.set(k,String(v)),removeItem:k=>map.delete(k)});
  function node(){return {dataset:{},style:{setProperty(){},removeProperty(){}},classList:{add(){},remove(){},contains(){return false},toggle(){}},append(){},appendChild(){},remove(){this.isConnected=false},querySelector(){return null},querySelectorAll(){return []},addEventListener(){},focus(){},setAttribute(){},getAttribute(){return null},isConnected:true,textContent:'',innerText:''};}
  const document={documentElement:{dataset:{},classList:{contains(){return false}}},head:node(),body:node(),cookie:'',visibilityState:'visible',createElement:node,querySelector(){return null},querySelectorAll(){return []},addEventListener(){}};
  const ctx={document,location:{host:'arena.ai',pathname:'/agent',reload(){}},navigator:{platform:'Linux',userAgent:'Test',locks:{request:async(n,o,fn)=>fn(options.lockBusy?null:{})}},crypto:webcrypto,URL,URLSearchParams,TextEncoder,console:{info(){}},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length},clearTimeout(){},setInterval:(fn,ms)=>{timers.push({fn,ms});return timers.length},clearInterval(){},requestAnimationFrame:fn=>fn(),addEventListener(){},removeEventListener(){},dispatchEvent(){},CustomEvent:class{},KeyboardEvent:class{},getComputedStyle:()=>({fontWeight:400}),confirm:()=>answers.shift()??true,prompt:()=>null,atob:s=>Buffer.from(s,'base64').toString('binary'),escape,decodeURIComponent,encodeURIComponent,
   GM_info:{scriptHandler:'Tampermonkey',version:'5.4'},GM_getValue:(k,d)=>gm.has(k)?clone(gm.get(k)):d,GM_setValue:(k,v)=>{gm.set(k,clone(v));gmWrites.push([k,clone(v)]);},GM_deleteValue:k=>{gmDeleted.push(k);gm.delete(k);},GM_addValueChangeListener(){},GM_registerMenuCommand(){},GM_setClipboard(){},
-  GM_cookie:{list:(d,cb)=>{trace.push('cookie.list');cb(clone(jar));},delete:(d,cb)=>{trace.push('cookie.delete');jar=jar.filter(c=>c.name!==d.name);cb();},set:(d,cb)=>{trace.push('cookie.set');if(failSet&&failSet(d)){failSet=null;cb('failure');return;}jar=jar.filter(c=>c.name!==d.name);if(!d.expirationDate||d.expirationDate>Date.now()/1000){const copy=clone(d);delete copy.url;copy.domain||='arena.ai';jar.push(copy);}cb();}},
+  GM_cookie:{list:(d,cb)=>{trace.push('cookie.list');cb(clone(jar));},delete:(d,cb)=>{trace.push('cookie.delete');jar=jar.filter(c=>c.name!==d.name);cb();},set:(d,cb)=>{trace.push('cookie.set');if(failSet&&failSet(d)){failSet=null;cb('failure');return;}jar=jar.filter(c=>c.name!==d.name);if(!Number.isFinite(d.expirationDate)||d.expirationDate>Date.now()/1000){const copy=clone(d);delete copy.url;copy.domain||='arena.ai';jar.push(copy);}cb();}},
   GM_xmlhttpRequest:opts=>{trace.push('http '+opts.method+' '+new URL(opts.url).pathname);const req={url:opts.url,method:opts.method,body:opts.data,headers:opts.headers};
    const action=options.intercept?.(req,server);Promise.resolve(action??server.send(req)).then(r=>opts.onload({status:r.status,responseText:JSON.stringify(r.body),responseHeaders:Object.entries(r.headers||{}).map(([k,v])=>k+': '+v).join('\r\n'),finalUrl:r.finalUrl||opts.url}),()=>opts.onerror());},
   fetch:async(url,opts)=>{trace.push('arena '+new URL(url).pathname);
@@ -24,13 +24,48 @@ function env(options={}) {
    return{ok:true,status:200,json:async()=>({user})};
   }
  };
+  const originalCookieApi=ctx.GM_cookie;
+  const domain=c=>String(c.domain||'arena.ai').replace(/^\./,'').toLowerCase();
+  const key=c=>JSON.stringify([c.name,c.domain||'arena.ai',c.path||'/']);
+  const plainList=originalCookieApi.list;
+  originalCookieApi.list=(details,cb)=>{
+   listCount++;
+   if(options.failRead?.(listCount)){trace.push('cookie.list');cb(null,'Synthetic Cookie API read failure');return;}
+   plainList(details,(items,error)=>cb(options.mapRead?options.mapRead(items,listCount):items,error));
+  };
+  if(options.strictBrowserCookies){
+   originalCookieApi.set=(d,cb)=>{
+    trace.push('cookie.set');const url=new URL(d.url||'https://arena.ai/agent');
+    if(d.name.startsWith('__Host-')&&(Object.hasOwn(d,'domain')||d.path!=='/'||!d.secure)){cb('The __Host- prefix forbids a Domain attribute');return;}
+    if(d.domain&&url.hostname!==domain(d)&&!url.hostname.endsWith('.'+domain(d))){cb('Cookie domain does not match the request URL');return;}
+    if(options.setError){cb(options.setError);return;}
+    const next={...clone(d),domain:d.domain?'.'+domain(d):url.hostname,hostOnly:!d.domain};delete next.url;
+    jar=jar.filter(c=>key(c)!==key(next));if(!Number.isFinite(d.expirationDate)||d.expirationDate>Date.now()/1000)jar.push(next);cb();
+   };
+   originalCookieApi.delete=(d,cb)=>{
+    trace.push('cookie.delete');const url=new URL(d.url||'https://arena.ai/agent');
+    const matches=jar.map((c,i)=>({c,i})).filter(({c})=>c.name===d.name&&(url.hostname===domain(c)||!c.hostOnly&&url.hostname.endsWith('.'+domain(c)))&&(url.pathname===c.path||url.pathname.startsWith(c.path.endsWith('/')?c.path:c.path+'/'))).sort((a,b)=>b.c.path.length-a.c.path.length);
+    if(matches[0])jar.splice(matches[0].i,1);cb();
+   };
+  }
+  if(options.cookieApi==='modern'||options.cookieApi==='classic-promise'){
+   const promiseApi={brand:'cookie-fixture'};
+   for(const method of ['list','set','delete'])promiseApi[method]=function(details){
+    assert.equal(this.brand,'cookie-fixture','Cookie API methods retain their receiver');
+    return new Promise((resolve,reject)=>originalCookieApi[method](details,(value,error)=>{
+     if(method==='list')error?reject(Error(error)):resolve(value);else value?reject(Error(value)):resolve();
+    }));
+   };
+   if(options.cookieApi==='modern'){ctx.GM={cookie:promiseApi};delete ctx.GM_cookie;}
+   else ctx.GM_cookie=promiseApi;
+  }
  ctx.localStorage=storage(ls);ctx.sessionStorage=storage(session);ctx.window=ctx;ctx.unsafeWindow=ctx;
  const instrument=source.slice(0,source.indexOf('  // ---------------- 启动 / 元数据同步 ----------------'))+`
   toast = message => globalThis.__notices.push(message);
   openLoginForm = () => {};
   navigateAfterSwitch = () => { globalThis.__navigated = true; };
   globalThis.__api={vault,reflect,toUI,syncCurrent,switchTo0,switchTo,signInEmail,replaceAuth,setCookie,migrateLegacy,quotaToServer,quotaFromServer,legacyQuota,gmTransport,
-    getAccounts:()=>accounts, getCurrent:()=>currentId};
+    listCookies,cookieCall,delCookie,errorText,rollbackAuth,getCookieMode:()=>cookieMode,getAccounts:()=>accounts, getCurrent:()=>currentId};
 })();`;
  ctx.__notices=notices;vm.createContext(ctx);vm.runInContext(instrument,ctx);
  async function connect(){await ctx.__api.vault.connect('https://meamoe.top/koa/arena-vault/connect#key='+server.key);ctx.__api.reflect();}
@@ -262,3 +297,137 @@ test('login saves password by default without persisting it in browser config',a
 test('login form defaults to remembering password',()=>{assert.ok(source.includes('remember.checked = true;'));assert.ok(!source.includes('默认不保存'));});
 test('cancelled migration uploads neither account nor password',async()=>{const e=env({confirm:[false]});e.gm.set('accounts.v2',[{email:'old@example.com',pw:'private'}]);await e.connect();await e.api.migrateLegacy();assert.equal(e.server.records.size,0);assert.equal(e.server.passwords.size,0);assert.equal(e.gm.has('accounts.v2'),true);});
 test('password upload failure retains legacy store',async()=>{const e=env({intercept:r=>r.method==='PUT'&&r.url.endsWith('/password')?status(503,'STORAGE_UNAVAILABLE'):null});e.gm.set('accounts.v2',[{email:'old@example.com',cookies:[cookie('old@example.com')],pw:'private'}]);await e.connect();await e.api.migrateLegacy();assert.equal(e.gm.has('accounts.v2'),true);assert.equal(e.gmDeleted.includes('accounts.v2'),false);});
+
+
+// Cookie API compatibility regressions use synthetic jars, never a real browser account.
+test('legacy __Host cookie without hostOnly restores without a forbidden Domain attribute',async()=>{
+ const e=env({strictBrowserCookies:true}),a=e.remote();
+ e.server.credentials.get(a.id).cookies.push({name:'__Host-arena-preference',value:'synthetic-target',domain:'arena.ai',path:'/',secure:true,httpOnly:true});
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),true);
+ const restored=e.jar.find(c=>c.name==='__Host-arena-preference');assert.equal(restored.hostOnly,true);assert.equal(restored.domain,'arena.ai');
+});
+test('GM.cookie promise-only environment can safely switch accounts',async()=>{
+ const e=env({cookieApi:'modern'}),a=e.remote();await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),true);assert.equal(e.ctx.__navigated,true);
+});
+test('promise-returning GM_cookie writes settle without waiting for an unused callback',async()=>{
+ const e=env({cookieApi:'classic-promise'});const pending=e.api.setCookie(cookie('target@example.com'));
+ for(let n=0;n<12;n++)await Promise.resolve();for(const timer of e.timers.filter(t=>t.ms===7000))timer.fn();
+ assert.equal(await pending,null);assert.equal(e.trace.filter(x=>x==='cookie.set').length,1);
+});
+test('a required Cookie read reports a read error instead of document.cookie fallback',async()=>{
+ const e=env({failRead:()=>true});await assert.rejects(e.api.listCookies({required:true}),x=>x.code==='COOKIE_READ_FAILED');assert.equal(e.trace.includes('cookie.delete'),false);
+});
+test('a read failure immediately before replacement cannot start clearing or writing cookies',async()=>{
+ const e=env({failRead:n=>n===2}),before=e.jar;await e.api.listCookies();
+ await assert.rejects(e.api.replaceAuth([cookie('target@example.com')]),x=>x.code==='COOKIE_READ_FAILED');
+ assert.deepEqual(e.jar,before);assert.equal(e.trace.includes('cookie.delete'),false);assert.equal(e.trace.includes('cookie.set'),false);
+});
+test('temporary readback failure does not prevent a subsequent rollback using the recovered API',async()=>{
+ const e=env({failRead:n=>n===3}),before=e.jar;await e.api.listCookies();
+ await assert.rejects(e.api.replaceAuth([cookie('target@example.com')]));await e.api.rollbackAuth(before);assert.equal(e.jar[0].value,before[0].value);
+});
+test('normal browser-created non-login cookies do not produce a false Cookie write failure',async()=>{
+ let targetValue='';const extra={name:'browser_generated',value:'synthetic-browser-value',domain:'arena.ai',path:'/',secure:true};
+ const e=env({mapRead:items=>items.some(c=>c.value===targetValue)?[...items,extra]:items}),a=e.remote();targetValue=e.server.credentials.get(a.id).cookies[0].value;
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),true);
+ assert.ok(e.server.credentials.get(a.id).cookies.some(c=>c.name==='browser_generated'));
+});
+test('leftover login fragments still fail readback and never navigate',async()=>{
+ const e=env(),a=e.remote();await e.connect();const original=e.ctx.GM_cookie.list;
+ e.ctx.GM_cookie.list=(d,cb)=>original(d,(items,err)=>cb([...items,{name:'arena-auth-prod-v1.9',value:'synthetic-stale',domain:'arena.ai',path:'/'}],err));
+ await e.api.listCookies();await assert.rejects(e.api.replaceAuth(e.server.credentials.get(a.id).cookies),x=>x.code==='COOKIE_WRITE_FAILED');assert.notEqual(e.ctx.__navigated,true);
+});
+test('malformed cookie rows are rejected before deleting the original login',async()=>{
+ const e=env(),before=e.jar;await e.api.listCookies();await assert.rejects(e.api.replaceAuth([null]),x=>x.code==='COOKIE_DATA_UNUSABLE');
+ assert.deepEqual(e.jar,before);assert.equal(e.trace.includes('cookie.delete'),false);
+});
+test('same-name cookies on different paths survive browser-accurate replacement',async()=>{
+ const e=env({strictBrowserCookies:true}),a=e.remote();e.server.credentials.get(a.id).cookies.push(
+  {name:'pref',value:'root',domain:'.arena.ai',path:'/',secure:true},
+  {name:'pref',value:'scoped',domain:'.arena.ai',path:'/agent',secure:true});
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),true);assert.equal(e.jar.filter(c=>c.name==='pref').length,2);
+});
+for(const [code,fragment] of [['COOKIE_READ_FAILED','读取'],['COOKIE_SET_FAILED','写入'],['COOKIE_DELETE_FAILED','清理'],['COOKIE_TIMEOUT','超时'],['COOKIE_WRITE_FAILED','核对'],['VERIFY_UNAVAILABLE','Arena'],['COOKIE_DATA_UNUSABLE','凭据']])
+ test('Cookie/action failure has a specific safe message: '+code,()=>{
+  const e=env(),message=e.api.errorText({code,message:'synthetic-private-cookie-value'});assert.ok(message.includes(fragment));assert.ok(!message.includes('操作失败，请检查连接与 Cookie 权限'));assert.ok(!message.includes('synthetic-private-cookie-value'));
+ });
+test('HttpOnly permission rejection is actionable and never displays the raw browser error',async()=>{
+ const e=env({strictBrowserCookies:true,setError:'HttpOnly cookies are supported in BETA only: synthetic-private-cookie-value'});
+ await assert.rejects(e.api.setCookie(cookie()),x=>x.code==='COOKIE_HTTPONLY_UNAVAILABLE');
+ const message=e.api.errorText({code:'COOKIE_HTTPONLY_UNAVAILABLE'});assert.match(message,/HttpOnly/);assert.match(message,/Tampermonkey/);assert.ok(!message.includes('synthetic-private-cookie-value'));
+});
+
+
+test('an old-account non-login cookie that could not be removed is not mistaken for a new browser cookie',async()=>{
+ const leftover={name:'old_account_preference',value:'synthetic-old-account',domain:'arena.ai',path:'/',secure:true};
+ const e=env({cookies:[cookie('current@example.com'),leftover]});await e.api.listCookies();const remove=e.ctx.GM_cookie.delete;
+ e.ctx.GM_cookie.delete=(d,cb)=>d.name===leftover.name?cb():remove(d,cb);
+ await assert.rejects(e.api.replaceAuth([cookie('target@example.com')]),x=>x.code==='COOKIE_WRITE_FAILED');
+});
+test('missing or changed target non-login cookies still fail readback',async()=>{
+ const e=env({mapRead:items=>items.map(c=>c.name==='target_preference'?{...c,value:'synthetic-unexpected-value'}:c)});await e.api.listCookies();
+ await assert.rejects(e.api.replaceAuth([cookie('target@example.com'),{name:'target_preference',value:'synthetic-intended-value',domain:'arena.ai',path:'/'}]),x=>x.code==='COOKIE_WRITE_FAILED');
+});
+test('preflight read failure during a switch neither mutates cookies nor starts a needless rollback',async()=>{
+ let readyToFail=false;
+ const e=env({failRead:()=>readyToFail,intercept:(r,server)=>{if(r.url.endsWith('/mirror')&&r.method==='GET'&&r.url.includes('/'+account.id+'/'))readyToFail=true;return null;}});
+ const account=e.remote(),before=e.jar;await e.connect();
+ assert.equal(await e.api.switchTo(e.api.toUI(account)),false);assert.deepEqual(e.jar,before);
+ assert.equal(e.trace.includes('cookie.delete'),false);assert.equal(e.trace.includes('cookie.set'),false);assert.ok(e.notices.at(-1).includes('COOKIE_READ_FAILED'));
+});
+test('callback plus Promise completion settles exactly once without repeating a mutation',async()=>{
+ const e=env(),set=e.ctx.GM_cookie.set;e.ctx.GM_cookie.set=(d,cb)=>{set(d,cb);return Promise.resolve({name:d.name});};
+ assert.equal(await e.api.setCookie(cookie('target@example.com')),null);await Promise.resolve();assert.equal(e.trace.filter(x=>x==='cookie.set').length,1);
+});
+test('a rejected Promise Cookie operation is handled without fallback retries or secret disclosure',async()=>{
+ const e=env({cookieApi:'modern'});let attempts=0;e.ctx.GM.cookie.set=function(){attempts++;return Promise.reject(new Error('synthetic-private-cookie-value'));};
+ await assert.rejects(e.api.setCookie(cookie()),x=>x.code==='COOKIE_SET_FAILED'&&!x.message.includes('synthetic-private-cookie-value'));assert.equal(attempts,1);
+});
+test('unreadable browser error objects cannot leave the Cookie request pending forever',async()=>{
+ const e=env();e.ctx.GM_cookie.set=(d,cb)=>cb(Object.defineProperty({},'message',{get(){throw Error('synthetic-private-cookie-value');}}));
+ await assert.rejects(e.api.setCookie(cookie()),x=>x.code==='COOKIE_SET_FAILED');
+});
+test('SameSite None is normalized case-insensitively without changing the cookie value',async()=>{
+ const e=env();let details;e.ctx.GM_cookie.set=(d,cb)=>{details=d;cb();};
+ const original={...cookie(),sameSite:'None'};await e.api.setCookie(original);assert.equal(details.sameSite,'no_restriction');assert.equal(details.value,original.value);
+});
+
+test('a fresh Cookie read failure after identity verification cannot upload an empty fallback bundle',async()=>{
+ let failNext=false;const e=env({failRead:()=>{const fail=failNext;failNext=false;return fail;}}),a=e.remote(),before=e.jar;
+ const fetch=e.ctx.fetch;e.ctx.fetch=async(url,opts)=>{const response=await fetch(url,opts);if(url.endsWith('/api/me'))failNext=true;return response;};
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),false);assert.equal(e.jar[0].value,before[0].value);
+ assert.equal(e.server.records.get(a.id).credentialRevision,1);assert.equal(e.server.credentials.get(a.id).cookies.length,1);
+ assert.ok(e.notices.at(-1).includes('COOKIE_READ_FAILED'));assert.notEqual(e.ctx.__navigated,true);
+});
+test('the __Host legacy repair does not silently transplant a foreign Cookie scope',async()=>{
+ const e=env({strictBrowserCookies:true});await assert.rejects(e.api.setCookie({name:'__Host-other',value:'synthetic',domain:'other.invalid',path:'/',secure:true}),x=>x.code==='COOKIE_SET_FAILED');
+ assert.equal(e.jar.some(c=>c.name==='__Host-other'),false);
+});
+
+test('password fallback also requires a complete post-login Cookie snapshot before committing',async()=>{
+ let failNext=false;const e=env({failRead:()=>{const fail=failNext;failNext=false;return fail;}}),a=e.remote(),before=e.jar;
+ const fetch=e.ctx.fetch;e.ctx.fetch=async(url,opts)=>{const response=await fetch(url,opts);if(url.endsWith('/api/me'))failNext=true;return response;};
+ await e.connect();const result=await e.api.signInEmail(a.email,'synthetic-password',{rememberPassword:false});
+ assert.ok(result.error.includes('COOKIE_READ_FAILED'));assert.equal(e.jar[0].value,before[0].value);assert.equal(e.server.records.get(a.id).credentialRevision,1);
+});
+
+test('document.cookie fallback remains read-only and is never accepted for a required snapshot',async()=>{
+ const e=env();delete e.ctx.GM_cookie.list;e.ctx.document.cookie='theme=dark; layout=wide';
+ const rows=await e.api.listCookies();assert.deepEqual(Array.from(rows,c=>c.name),['theme','layout']);assert.equal(e.api.getCookieMode(),'document');
+ await assert.rejects(e.api.listCookies({required:true}),x=>x.code==='COOKIE_PERMISSION');assert.equal(e.trace.includes('cookie.delete'),false);
+});
+
+test('an unavailable modern namespace does not break a working legacy Cookie API',async()=>{
+ const e=env();e.ctx.GM=Object.defineProperty({},'cookie',{get(){throw Error('unsupported modern namespace');}});
+ assert.equal(await e.api.setCookie(cookie()),null);assert.equal(e.trace.filter(x=>x==='cookie.set').length,1);
+});
+
+test('legacy session cookies ignore an obsolete persistent expiry during readback just as during writing',async()=>{
+ const e=env(),a=e.remote();Object.assign(e.server.credentials.get(a.id).cookies[0],{session:true,expirationDate:0});
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),true);assert.equal(e.jar[0].expirationDate,undefined);
+});
+test('a persistent cookie with zero expiry stays expired instead of being extended',async()=>{
+ const e=env(),a=e.remote(),before=e.jar;Object.assign(e.server.credentials.get(a.id).cookies[0],{session:false,expirationDate:0});
+ await e.connect();assert.equal(await e.api.switchTo(e.api.toUI(a)),false);assert.equal(e.jar[0].value,before[0].value);
+ assert.equal(e.server.records.get(a.id).status,'reauth_required');assert.equal(e.server.records.get(a.id).credentialRevision,1);
+});

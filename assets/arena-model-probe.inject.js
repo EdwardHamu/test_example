@@ -63,7 +63,24 @@ function summarizeReasoning(evidence = []) {
     note:'显式配置不代表实际计算量；预算与开关不换算为档位，型号后缀不作为显式强度。' };
 }
 
-// Presentation only: never modify model IDs used by sync, matching or history.
+// Sync naming policy only. Probe names/IDs remain independent of reasoning inspection.
+function cleanModelName(value) {
+  if (typeof value !== 'string' || /[\x00-\x1f\x7f]|Bearer\s|eyJ[\w-]+\.[\w-]+\./i.test(value)) return null;
+  const name = value.trim();
+  return name && name.length <= 200 && !/^(?:unknown|unrecognized|未知|未识别|未提供)$/i.test(name) ? name : null;
+}
+function resolveModelName(internal, display) {
+  internal = cleanModelName(internal); display = cleanModelName(display);
+  if (!internal) return display;
+  if (!display || internal === display) return internal;
+  // Compare complete normalized names, not arbitrary shared words or model-family guesses.
+  // Token boundaries keep model-1 distinct from model-10 and gpt-4 distinct from gpt-4o.
+  const comparable = value => value.normalize('NFKC').toLowerCase().replace(/[\s_.:\/\\-]+/g,' ').trim();
+  const a=comparable(internal), b=comparable(display);
+  if (a && b && (` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `))) return internal;
+  return internal + '-' + display;
+}
+// Effort is a presentation decoration, never part of the synchronized model name.
 function modelLabel(name, reasoning = {}, context = {}) {
  const level = reasoning.level;
  const tier = context.historical ? '未知（历史记录）' : context.ambiguous ? '未知（多次调用）'
@@ -71,6 +88,8 @@ function modelLabel(name, reasoning = {}, context = {}) {
    : reasoning.status === 'explicit' && EFFORT_LEVELS.includes(level) ? level : '未知';
  return String(name || '未识别') + ' · ' + tier;
 }
+  exp.resolveModelName = resolveModelName;
+  exp.cleanModelName = cleanModelName;
   exp.modelLabel = modelLabel;
   exp.cleanReasoningPath = cleanReasoningPath;
   exp.EFFORT_LEVELS = EFFORT_LEVELS;
@@ -4699,8 +4718,8 @@ class HUD {
     const real = extras.realModel;
     const realBlock = real
       ? `<div class="verdict real">
-            <div class="mode">${real.historical ? '本会话最近保存的模型标签' : latestCall ? '最新调用 · '+(latestCall.order==='start-time'?'按开始时间':'按 Trace 顺序') : '运行记录中的模型标签'}</div>
-            <div class="model">${esc(modelLabel(latestCall && !real.historical ? latestCall.requestModel || '最新调用（型号未提供）' : real.name, reasoning, {historical:real.historical, ambiguous}))}</div>
+            <div class="mode">${real.historical ? '本会话最近保存的模型标签' : '运行记录中的模型标签'}</div>
+            <div class="model">${esc(modelLabel(real.name, reasoning, {historical:real.historical, ambiguous}))}</div>
             <div class="ev mono">runId: ${esc(real.runId || '-')}${real.tokens && real.tokens.length ? ' · tokens ' + esc(real.tokens.join(',')) : ''}</div>
             ${real.all && real.all.length > 1
               ? `<div class="ev">本轮出现: ${esc(real.all.map(name=>modelLabel(name, {}, {historical:real.historical, ambiguous:true})).join(', '))}</div>` : ''}
@@ -4757,9 +4776,9 @@ class HUD {
         <div class="overview" role="status"><span class="dot ${dotCls}" aria-hidden="true"></span><span>${!v ? '等待观测' : v.mode === 'RESOLVED' ? '已确认模型' : v.mode === 'INFERRED' ? '推断结果 · 请核实' : '尚未确认模型'} · ${esc(vd.mode)}</span></div>
         ${realBlock}
         <section class="verdict primary" aria-label="模型判定">
-          <div class="mode">${latestCall ? '最新调用' : '模型判定'} · ${esc(vd.mode)}</div>
-          <div class="model">${esc(v ? modelLabel(latestCall && vd.source !== 'conversation.history' ? latestCall.requestModel || '最新调用（型号未提供）' : vd.label || vd.modelId || '未识别', reasoning, {historical:vd.source === 'conversation.history', ambiguous}) : vd.label)}</div>
-          ${!latestCall && vd.modelId && vd.label && vd.modelId !== vd.label ? `<div class="ev mono">id: <b>${esc(vd.modelId)}</b></div>` : ''}
+          <div class="mode">模型判定 · ${esc(vd.mode)}</div>
+          <div class="model">${esc(v ? modelLabel(vd.label || vd.modelId || '未识别', reasoning, {historical:vd.source === 'conversation.history', ambiguous}) : vd.label)}</div>
+          ${vd.modelId && vd.label && vd.modelId !== vd.label ? `<div class="ev mono">id: <b>${esc(vd.modelId)}</b></div>` : ''}
           <div class="bar" role="progressbar" aria-label="判定规则分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0,Math.min(100,conf))}"><i style="width:${Math.max(0,Math.min(100,conf))}%"></i></div>
           <div class="meta">
             <span class="tag ${this.confidenceClass(vd.confidence || 0)}">规则分 ${conf}%</span>
@@ -6370,6 +6389,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
   // 不持久化 gen / baseGen / deadline 等运行期量：它们绑定 BUS.generation 与
   // performance.now()，刷新后必然失效，原样恢复会造成误判或重复发送。
   const GACHA_STATE_KEY = 'amp_page_gacha_session';
+  const GACHA_POSITION_KEY = 'amp_page_gacha_pos';
   const RESUME_TTL_MS = 30 * 60 * 1000;   // 超过 30 分钟的残留状态不再自动恢复
   const RESUME_GRACE_MS = 45000;          // 刷新后最多等 45 秒确认上一轮模型名
   function defaultStorage() {
@@ -6719,12 +6739,91 @@ __mods["gacha-runner"] = { fn: function (exp) {
     }
     return {start,stop,tick,restore,state:()=>({...s}),dispose:()=>{stop();}};
   }
+  // UI preference only: do not mix coordinates with resumable jobs, prompts or account data.
+  function bindPanelPosition(root, handle, {win = window, doc = document, storage = defaultStorage()} = {}) {
+    if (!root || !handle?.addEventListener || !doc?.addEventListener) return () => {};
+    const pointer = typeof win.PointerEvent === 'function';
+    const events = pointer ? ['pointerdown', 'pointermove', 'pointerup'] : ['mousedown', 'mousemove', 'mouseup'];
+    const interactive = 'button, input, textarea, select, a, summary, [contenteditable="true"]';
+    let position = null, drag = null, observer = null, disposed = false;
+    const save = () => {
+      if (!position) return;
+      try { storage?.setItem(GACHA_POSITION_KEY, JSON.stringify(position)); } catch { /* Keep dragging usable when storage is unavailable. */ }
+    };
+    const place = (left, top) => {
+      const rect = root.getBoundingClientRect();
+      const width = Number(win.innerWidth) || doc.documentElement?.clientWidth || 0;
+      const height = Number(win.innerHeight) || doc.documentElement?.clientHeight || 0;
+      const next = {left:Math.max(8, Math.min(Math.max(8, width - rect.width - 8), left)),
+        top:Math.max(8, Math.min(Math.max(8, height - rect.height - 8), top))};
+      const changed = !position || next.left !== position.left || next.top !== position.top;
+      position = next;
+      root.style.left = next.left + 'px'; root.style.top = next.top + 'px';
+      root.style.right = 'auto'; root.style.bottom = 'auto';
+      return changed;
+    };
+    const reflow = () => { if (!disposed && position && place(position.left, position.top)) save(); };
+    try {
+      const saved = JSON.parse(storage?.getItem(GACHA_POSITION_KEY) || 'null');
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) place(saved.left, saved.top);
+    } catch { /* A corrupt preference must not block the panel. */ }
+    const belongs = event => !pointer || drag?.pointerId == null || event?.pointerId == null || event.pointerId === drag.pointerId;
+    const finish = event => {
+      if (!drag || !belongs(event)) return;
+      const previous = drag; drag = null;
+      doc.removeEventListener(events[1], move); doc.removeEventListener(events[2], finish);
+      if (pointer) doc.removeEventListener('pointercancel', finish);
+      handle.style.cursor = 'grab';
+      if (pointer && previous.pointerId != null) { try { handle.releasePointerCapture?.(previous.pointerId); } catch {} }
+      if (previous.moved) save();
+    };
+    const move = event => {
+      if (!drag || !belongs(event) || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+      const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+      if (!drag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+      drag.moved = true; place(drag.left + dx, drag.top + dy); event.preventDefault?.();
+    };
+    const down = event => {
+      if (disposed || drag || event.isPrimary === false || event.button != null && event.button !== 0
+        || event.target?.closest?.(interactive) || !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return;
+      const rect = root.getBoundingClientRect();
+      drag = {x:event.clientX, y:event.clientY, left:rect.left, top:rect.top, pointerId:event.pointerId, moved:false};
+      handle.style.cursor = 'grabbing';
+      doc.addEventListener(events[1], move, {passive:false}); doc.addEventListener(events[2], finish);
+      if (pointer) {
+        doc.addEventListener('pointercancel', finish);
+        try { handle.setPointerCapture?.(event.pointerId); } catch { /* Document listeners still provide a fallback. */ }
+      }
+      event.preventDefault?.();
+    };
+    const keydown = event => {
+      if (disposed || drag || event.altKey || event.ctrlKey || event.metaKey) return;
+      const delta = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]}[event.key];
+      if (!delta || event.target?.closest?.(interactive)) return;
+      const rect = root.getBoundingClientRect(), step = event.shiftKey ? 50 : 10;
+      place(rect.left + delta[0] * step, rect.top + delta[1] * step); save(); event.preventDefault?.(); event.stopPropagation?.();
+    };
+    handle.style.cursor = 'grab';
+    handle.addEventListener(events[0], down); handle.addEventListener('keydown', keydown);
+    if (pointer) handle.addEventListener('lostpointercapture', finish);
+    win.addEventListener?.('resize', reflow); win.addEventListener?.('blur', finish);
+    if (typeof win.ResizeObserver === 'function') {
+      try { observer = new win.ResizeObserver(reflow); observer.observe(root); } catch { observer?.disconnect(); observer = null; }
+    }
+    return () => {
+      if (disposed) return;
+      finish(); disposed = true; observer?.disconnect();
+      handle.removeEventListener(events[0], down); handle.removeEventListener('keydown', keydown);
+      if (pointer) handle.removeEventListener('lostpointercapture', finish);
+      win.removeEventListener?.('resize', reflow); win.removeEventListener?.('blur', finish);
+    };
+  }
   function mount({info, blocked}) {
     if(typeof document==='undefined' || !document.body)return null;
     window.__AMP_PAGE_GACHA__?.dispose?.();
     const root=document.createElement('aside');root.id='amp-target-gacha';
-    root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;width:280px;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
-    root.innerHTML='<strong>目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。待选项卡视为本轮完成；其他弹窗等待5秒重试(最多5次)；次要目标 sol / opus / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
+    root.style.cssText='position:fixed;right:16px;bottom:16px;z-index:2147483000;box-sizing:border-box;width:280px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto;padding:12px;border:1px solid #475569;border-radius:10px;background:#0f172a;color:#e2e8f0;font:13px/1.5 sans-serif;box-shadow:0 4px 18px #0006';
+    root.innerHTML='<strong data-drag-handle tabindex="0" role="button" aria-label="拖动抽卡浮窗；方向键移动，Shift 加速" title="拖动标题可移动，位置会自动保存；方向键也可移动" style="display:block;cursor:grab;touch-action:none;user-select:none;outline-offset:4px">目标抽卡 · astra / fable</strong><details><summary>提示词与说明</summary><textarea aria-label="抽卡提示词" rows="3" style="box-sizing:border-box;width:100%;margin:8px 0">只回答数字1，不要补充其他文字。</textarea><small>每轮发送会消耗额度。待选项卡视为本轮完成；其他弹窗等待5秒重试(最多5次)；次要目标 sol / opus / gemini 不停止，等待40秒再继续；识别不出模型名不停止，跳过该轮直接继续(连续5轮才暂停)。请勿同时启动桌面抽卡；验证码、限流或异常会暂停。</small></details><p data-status style="margin:8px 0;overflow-wrap:anywhere">等待开始</p><button type="button" data-start>开始</button><button type="button" data-stop style="margin-left:16px">停止</button>';
     const status=root.querySelector('[data-status]'),startButton=root.querySelector('[data-start]'),input=root.querySelector('textarea');
     const runner=create({bridge:()=>__req("page-bridge").ensure(),info,blocked,
       claim:o=>{window.__AMP_GACHA_OWNER__=o;},release:o=>{if(window.__AMP_GACHA_OWNER__===o)delete window.__AMP_GACHA_OWNER__;},
@@ -6733,6 +6832,7 @@ __mods["gacha-runner"] = { fn: function (exp) {
     // 手动停止视为明确意图：清除存档，刷新后不再自动继续。
     root.querySelector('[data-stop]').onclick=()=>{runner.stop();clearSaved();};
     document.body.appendChild(root);
+    const detachPosition = bindPanelPosition(root, root.querySelector('[data-drag-handle]'));
     // 页面意外刷新后自动继续：仅当存档处于 running 且未过期。
     let resumed=false;
     try {
@@ -6748,11 +6848,12 @@ __mods["gacha-runner"] = { fn: function (exp) {
     } catch { /* 存档损坏不应阻塞面板挂载 */ }
     const timer=setInterval(runner.tick,25);
     const api={start:runner.start,stop:runner.stop,state:runner.state,resumed:()=>resumed,
-      dispose(){clearInterval(timer);runner.dispose();root.remove();}};
+      dispose(){clearInterval(timer);detachPosition();runner.dispose();root.remove();}};
     window.__AMP_PAGE_GACHA__=api;return api;
   }
   exp.target=target;exp.secondary=secondary;exp.roundWait=roundWait;exp.create=create;exp.mount=mount;
   exp.classifyPause=classifyPause;
+  exp.GACHA_POSITION_KEY=GACHA_POSITION_KEY;exp.bindPanelPosition=bindPanelPosition;
   exp.GACHA_STATE_KEY=GACHA_STATE_KEY;exp.RESUME_TTL_MS=RESUME_TTL_MS;
   exp.readSaved=readSaved;exp.clearSaved=clearSaved;exp.resumable=resumable;
 } };
@@ -7470,6 +7571,7 @@ function boot(opts = {}) {
     hud: state.hud,
     state,
     classify: () => recompute('api'),
+    resolveModelName: __req("reasoning").resolveModelName,
     reasoning: () => currentFacts().effort,
     desktopFacts: () => currentFacts(),
     // USD-only snapshot, bound to the current page, run, generation and turn.
