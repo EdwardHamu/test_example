@@ -41,3 +41,40 @@ test('automatic details do nothing when page context is stale',async()=>{const a
 test('runmodel mocked end-to-end acquires same-run details and resets',async()=>{const f=fixture();const calls=[];const {req}=load({fetch:async(u,o)=>{calls.push(u);assert.equal(o.credentials,'omit');assert.equal(o.redirect,'error');return {ok:true,status:200,text:async()=>JSON.stringify(u.endsWith('/events')?f.trace:f.details.find(x=>u.endsWith(x.spanId)))};}});const run=req('runmodel');assert.equal(run.acceptToken('public-access-token',jwt(payload())),true);const result=await run.fetchRunModels();assert.equal(result.ok,true);assert.equal(calls.length,4);assert.equal(run.state().automaticTrace.summary.internalTier,'high');assert.equal(run.state().token,undefined);assert.equal((await run.fetchRunModels()).reason,'finished');assert.equal(calls.length,4);run.reset();assert.equal(run.state().automaticTrace,null);});
 test('HUD distinguishes explicit effort internal hint and zero usage while retaining controls',()=>{const HUD=load().req('ui').HUD;const mock={root:{querySelectorAll:()=>[],innerHTML:''},logs:[],confidenceClass:()=>''};HUD.prototype.render.call(mock,null,{reasoning:{display:'high（显式）',modes:['adaptive'],budgetText:'自动 (-1)'},reasoningFacts:{internalTier:'max',internalModel:'<model>',observation:{status:'reported-zero',tokens:0}}});for(const t of ['high（显式）','名称后缀，非显式配置','0 tokens','adaptive','toggle-notify','toggle-esc','&lt;model&gt;'])assert.ok(mock.root.innerHTML.includes(t),t);});
 test('existing notification API and upgraded version remain present',()=>{for(const text of ['testNotification:','setNotificationEnabled:','triggerEsc:','setAutoEscEnabled:','acceptTraceDetail:','desktopFacts:'])assert.ok(source.includes(text),text);assert.ok(/const VERSION = '1\.2\.4\+assets-9\.17\./.test(source));});
+
+test('native-suite compatibility preserves original evidence path through sanitization',()=>{
+ const a=load().req('agent-detail'),f=fixture(),e=a.selectDetailSpans(f.trace,f.runId).selected[0];
+ const parsed=a.parseDetailSpan(f.details[0],e,f.runId),clean=a.sanitizeDetail({spans:[parsed],checkedAt:new Date().toISOString()});
+ assert.equal(clean.spans[0].reasoning[0].path,'$.ai.settings.reasoningEffort');
+ const summary=load().req('trace-summary').latestTraceSummary(clean);assert.equal(summary.configs[0].path,'$.ai.settings.reasoningEffort');
+});
+test('cookie signature and unsafe object keys are never reasoning evidence',()=>{
+ const r=load().req('reasoning');assert.equal(r.extractReasoning({cookie:{reasoning_effort:'high'},signature:{reasoning_effort:'high'},'private secret':{reasoning_effort:'high'}}).length,0);
+});
+test('OpenTelemetry usage alias and Google thoughts token count support conflicts',()=>{
+ const a=load().req('agent-detail'),f=fixture(),e=a.selectDetailSpans(f.trace,f.runId).selected[0];
+ const props={'gen_ai.usage.reasoning_tokens':5,'ai.response.providerMetadata':{google:{usageMetadata:{thoughtsTokenCount:5,prompt:'PRIVATE'}}}};
+ let parsed=a.parseDetailSpan({...f.details[0],properties:props},e,f.runId);assert.equal(parsed.values.reasoningTokens,5);assert.equal(parsed.providerMeta['google.usageMetadata.thoughtsTokenCount'],5);assert.ok(!JSON.stringify(parsed).includes('PRIVATE'));
+ props['ai.usage.reasoningTokens']=6;parsed=a.parseDetailSpan({...f.details[0],properties:props},e,f.runId);assert.equal(parsed.values.reasoningConflict,true);
+});
+test('generateText spans are selected and eligible for same-run collection',()=>{
+ const {req}=load(),a=req('agent-detail'),f=fixture();f.trace.events[1].message='ai.generateText.doGenerate';
+ assert.equal(a.selectDetailSpans(f.trace,f.runId).selected[0].kind,'stream');assert.equal(req('trace-summary').detailReadiness(f.trace,f.runId),true);
+});
+
+test('model label uses only explicit effort and leaves model identity untouched',()=>{
+ const r=load().req('reasoning');for(const level of r.EFFORT_LEVELS)assert.equal(r.modelLabel('demo',{status:'explicit',level}),'demo · '+level);
+ for(const input of [{},{level:'high'},{status:'explicit',level:'future'},{status:'unknown',budgetText:'9000',tokens:9000}])assert.equal(r.modelLabel('demo-high',input),'demo-high · 未知');
+ assert.equal(r.modelLabel('demo',{status:'conflict',level:'high'}),'demo · 冲突');assert.equal(r.modelLabel('demo',{status:'unsupported'}),'demo · 不支持');
+ assert.equal(r.modelLabel('demo',{status:'explicit',level:'high'},{historical:true}),'demo · 未知（历史记录）');
+ assert.equal(r.modelLabel('demo',{status:'explicit',level:'high'},{ambiguous:true}),'demo · 未知（多次调用）');
+});
+test('HUD titles include effort while historical and multi-call labels never inherit it',()=>{
+ const HUD=load().req('ui').HUD,render=(v,extras)=>{const mock={root:{querySelectorAll:()=>[],innerHTML:''},logs:[],confidenceClass:()=>''};HUD.prototype.render.call(mock,v,extras);return mock.root.innerHTML;};
+ const v={mode:'RESOLVED',modelId:'demo',label:'Demo',confidence:1,evidence:[]},extras={realModel:{name:'demo'},reasoning:{status:'explicit',level:'high'}};
+ let html=render(v,extras);assert.ok(html.includes('class="model">demo · high</div>'));assert.ok(html.includes('class="model">Demo · high</div>'));assert.equal(v.modelId,'demo');assert.equal(extras.realModel.name,'demo');
+ html=render({...v,source:'conversation.history'},{...extras,realModel:{name:'demo',historical:true}});assert.ok(html.includes('demo · 未知（历史记录）'));assert.ok(html.includes('Demo · 未知（历史记录）'));
+ html=render(v,{...extras,reasoningFacts:{coverage:'ambiguous'}});assert.ok(html.includes('demo · 未知（多次调用）'));assert.ok(!html.includes('class="model">Demo · high'));
+ html=render(v,{...extras,realModel:{name:'<img onerror=alert(1)>'}});assert.ok(html.includes('&lt;img onerror=alert(1)&gt; · high'));assert.ok(!html.includes('<img onerror'));
+ html=render(v,{realModel:{name:'demo-high'}});assert.ok(html.includes('demo-high · 未知'));
+});

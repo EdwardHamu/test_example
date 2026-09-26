@@ -46,6 +46,8 @@
       let plan=null;
       button('1. 检查修复并备份',()=>{plan=window.__arenaConversationRecovery.prepare();apply.disabled=!plan.eligible;if(plan.eligible){download('arena-recovery-backup.json',JSON.stringify(plan.backup,null,2),'application/json');return '已请求下载修复备份。确认文件已保存后，再点击应用；仅处理已验证的孤立末尾消息。';}return '未检测到可安全修复的孤立节点，不做修改。';});
       const apply=button('2. 确认备份后应用修复',()=>{if(!plan?.eligible)return;if(!confirm('确认备份文件已保存？将移除经验证的孤立末尾消息；这不是服务端数据修复。'))return;const r=window.__arenaConversationRecovery.apply(plan.token);apply.disabled=true;return r;});apply.disabled=true;
+      api.reasoningInspector?.mount(panel);
+      button('检查当前思考等级',()=>api.reasoningInspector?.refresh());
       el('h3','探针与通知');
       button('当前模型/推理',()=>({model:call('realModel'),reasoning:call('reasoning'),native:call('nativeStatus')}));
       button('额度状态',()=>({billing:api.balance('start','userscript'),usd:call('usdQuotaSnapshot')}));

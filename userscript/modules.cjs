@@ -1,6 +1,7 @@
 'use strict';
 // Source locations; startup order and API wiring live in main.js.
 module.exports=[
+ ['REASONING','tools/userscript-reasoning.js','expression'],
  ['COMPOSERESC','tools/userscript-composer-auto-esc.js','expression'],
   ['COMPOSER', 'tools/userscript-composer-visibility.js', 'expression'],
   ['REVIEW', 'tools/userscript-task-review-hider.js', 'expression'],

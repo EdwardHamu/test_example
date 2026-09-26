@@ -12,10 +12,16 @@ function __req(id) {
 __mods["reasoning"] = { fn: function (exp) {
 /** Explicit configuration only. Model suffixes, timing and token counts are not effort evidence. */
 const EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const SKIP = /^(?:messages?|parts|content|text|delta|prompt|input|output|choices|candidates|headers|token|authorization|apiKey|password|secret)$/i;
+const SKIP = /^(?:messages?|parts|content|text|delta|prompt|input|output|choices|candidates|headers|token|authorization|apiKey|password|secret|cookie|cookies|credential|credentials|signature|payload|blob)$/i;
+function cleanReasoningPath(value) {
+ if(typeof value!=='string'||value.length>240||!/^\$(?:\.[\w-]{1,80}){1,20}$/.test(value))return null;
+ if(value.split('.').some(k=>/^(?:cookie|cookies|headers|authorization|token|password|secret|signature|messages?|content|text)$/i.test(k)))return null;
+ return value;
+}
 function extractReasoning(node, source = 'request', path = '$', depth = 0, out = []) {
   if (!node || typeof node !== 'object' || Array.isArray(node) || depth > 8 || out.length >= 60) return out;
   for (const [key, original] of Object.entries(node).slice(0, 200)) {
+    if(!/^[\w.-]{1,180}$/.test(key))continue;
     const segments = key.split('.');
     if (segments.some(k => SKIP.test(k))) continue;
     const p = `${path}.${key}`, leaf = segments[segments.length - 1];
@@ -57,6 +63,16 @@ function summarizeReasoning(evidence = []) {
     note:'显式配置不代表实际计算量；预算与开关不换算为档位，型号后缀不作为显式强度。' };
 }
 
+// Presentation only: never modify model IDs used by sync, matching or history.
+function modelLabel(name, reasoning = {}, context = {}) {
+ const level = reasoning.level;
+ const tier = context.historical ? '未知（历史记录）' : context.ambiguous ? '未知（多次调用）'
+   : reasoning.status === 'conflict' ? '冲突' : reasoning.status === 'unsupported' ? '不支持'
+   : reasoning.status === 'explicit' && EFFORT_LEVELS.includes(level) ? level : '未知';
+ return String(name || '未识别') + ' · ' + tier;
+}
+  exp.modelLabel = modelLabel;
+  exp.cleanReasoningPath = cleanReasoningPath;
   exp.EFFORT_LEVELS = EFFORT_LEVELS;
   exp.extractReasoning = extractReasoning;
   exp.summarizeReasoning = summarizeReasoning;
@@ -110,7 +126,7 @@ __mods["trace-summary"] = { fn: function (exp) {
   var EFFORT_LEVELS = __req("reasoning").EFFORT_LEVELS;
   var summarizeReasoning = __req("reasoning").summarizeReasoning;
 /** Shared, allowlisted Trace-to-desktop facts. No network or storage. */
-const REASONING_SOURCES = ['ai.usage.reasoningTokens','providerMetadata.anthropic.usage.output_tokens_details.thinking_tokens','providerMetadata.vertex.usageMetadata.thoughtsTokenCount'];
+const REASONING_SOURCES = ['ai.usage.reasoningTokens','providerMetadata.anthropic.usage.output_tokens_details.thinking_tokens','providerMetadata.vertex.usageMetadata.thoughtsTokenCount','gen_ai.usage.reasoning_tokens','providerMetadata.google.usageMetadata.thoughtsTokenCount'];
 const count = v => Number.isSafeInteger(v) && v >= 0 ? v : null;
 const label = v => typeof v === 'string' && v.length <= 200 && !/[\u0000-\u001f\u007f]/.test(v) && !/Bearer |^eyJ/.test(v) ? v : null;
 function reasoningSource(v) { return typeof v === 'string' && v.split(' / ').every(p=>REASONING_SOURCES.includes(p)) ? v : null; }
@@ -120,6 +136,7 @@ function observedReasoning(values = {}, meta = {}) {
  add(values.reasoningTokens,reasoningSource(values.reasoningSource)||REASONING_SOURCES[0]);
  add(meta['anthropic.usage.output_tokens_details.thinking_tokens'],REASONING_SOURCES[1]);
  add(meta['vertex.usageMetadata.thoughtsTokenCount'],REASONING_SOURCES[2]);
+ add(meta['google.usageMetadata.thoughtsTokenCount'],REASONING_SOURCES[4]);
  const counts=[...new Set(readings.map(r=>r.value))], conflict=values.reasoningConflict===true||counts.length>1;
  return {status:conflict?'conflict':counts.length?counts[0]>0?'reported-positive':'reported-zero':'unavailable',tokens:!conflict&&counts.length?counts[0]:null,source:[...new Set(readings.flatMap(r=>r.source.split(' / ')))].join(' / '),evidence:readings};
 }
@@ -136,9 +153,9 @@ function detailReadiness(trace,runId) {
  for(const e of Array.isArray(trace?.events)?trace.events:[]) {
   if(e?.runId!==runId)continue;
   if(/^chat turn \d+$/.test(e.message||'')){latest=[];continue;}
-  if(['ai.streamText.doStream','token.usage.recorded','spend.recorded'].includes(e.message))latest.push(e);
+  if(['ai.streamText.doStream','ai.generateText.doGenerate','token.usage.recorded','spend.recorded'].includes(e.message))latest.push(e);
  }
- return latest.length>0 && latest.every(e=>e.isPartial===false) && ['ai.streamText.doStream','token.usage.recorded','spend.recorded'].every(k=>latest.some(e=>e.message===k));
+ return latest.length>0 && latest.every(e=>e.isPartial===false) && latest.some(e=>['ai.streamText.doStream','ai.generateText.doGenerate'].includes(e.message)) && ['token.usage.recorded','spend.recorded'].every(k=>latest.some(e=>e.message===k));
 }
 // Only remove an observed, allowlisted deployment suffix. Never infer effort from token counts.
 function internalTierFromModels(internalModel, requestModel) {
@@ -178,9 +195,9 @@ function latestTraceSummary(detail) {
  const internalNameHint=hintMatch&&normalize(hintMatch[1])===normalize(requestModel)?hintMatch[2].toLowerCase():null;
  const configs=[];
  for(const e of Array.isArray(stream.reasoning)?stream.reasoning.slice(0,60):[]){
-  if(e?.kind==='effort')configs.push({kind:'effort',level:EFFORT_LEVELS.includes(e.level)?e.level:null,source:'run.span'});
-  if(e?.kind==='budget'&&Number.isSafeInteger(e.value)&&e.value>=-1)configs.push({kind:'budget',value:e.value,source:'run.span'});
-  if(e?.kind==='mode'&&['enabled','disabled','adaptive'].includes(e.value))configs.push({kind:'mode',value:e.value,source:'run.span'});
+  if(e?.kind==='effort')configs.push({kind:'effort',level:EFFORT_LEVELS.includes(e.level)?e.level:null,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
+  if(e?.kind==='budget'&&Number.isSafeInteger(e.value)&&e.value>=-1)configs.push({kind:'budget',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
+  if(e?.kind==='mode'&&['enabled','disabled','adaptive'].includes(e.value))configs.push({kind:'mode',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
  }
  return {calls,coverage:detail?.limited||detail?.stopped||!usageSpans.length||!costSpans.length?'partial':'complete',turn,usage,observation,configs,internalModel,internalTier:tier,internalNameHint,requestModel,responseModel,modelProvider,protocolProvider,routeConflict,spanIds:current.map(s=>s.spanId),checkedAt:label(detail?.checkedAt)};
 }
@@ -216,7 +233,7 @@ __mods["agent-detail"] = { fn: function (exp) {
 
 /* Agent span detail: three model-name layers, call settings, usage and cost semantics from span properties.
    Whitelist only. Never stores tokens, prompts, message text, reasoning text or raw span payloads. */
-const SPAN_KINDS = {'ai.streamText.doStream': 'stream', 'token.usage.recorded': 'usage', 'spend.recorded': 'cost'};
+const SPAN_KINDS = {'ai.streamText.doStream': 'stream', 'ai.generateText.doGenerate': 'stream', 'token.usage.recorded': 'usage', 'spend.recorded': 'cost'};
 const TURN = /^chat turn (\d{1,4})$/;
 const DETAIL_LIMITS = {turns: 6, spans: 24};
 const spanId = v => typeof v === 'string' && /^[a-f0-9]{16,32}$/.test(v) ? v : null;
@@ -266,7 +283,7 @@ function metaShape(value, depth = 0, out = {}, prefix = '', budget = {n: META_LI
     if (budget.n <= 0) break;
     const key = (prefix ? prefix + '.' : '') + String(k).slice(0, 60);
     if (SECRET_KEY.test(k)) {out[key]='<redacted>';budget.n--;continue;}
-    if (k === 'usageMetadata' && prefix === 'vertex' && v && typeof v === 'object' && !Array.isArray(v)) {
+    if (k === 'usageMetadata' && ['vertex','google'].includes(prefix) && v && typeof v === 'object' && !Array.isArray(v)) {
       for (const field of ['thoughtsTokenCount','promptTokenCount','candidatesTokenCount','totalTokenCount','cachedContentTokenCount']) {if (budget.n > 0 && count(v[field]) !== null) {out[key+'.'+field]=v[field];budget.n--;}}
       continue;
     }
@@ -308,9 +325,15 @@ function parseDetailSpan(detail, event, runId) {
   const hints = event.kind === 'stream' ? SETTING_HINTS.filter(p => get(props, p) !== undefined) : [];
   const out = {spanId: event.spanId, kind: event.kind, turn: Number.isSafeInteger(event.turn) && event.turn > 0 ? event.turn : null, partial: event.partial || detail.isPartial !== false, values, settingKeys: hints};
   if (event.kind === 'stream') {
+    const otelReasoning = count(get(props, 'gen_ai.usage.reasoning_tokens'));
+    if(otelReasoning !== null) {
+      if(count(values.reasoningTokens)!==null && values.reasoningTokens!==otelReasoning) values.reasoningConflict=true;
+      if(count(values.reasoningTokens)===null) {values.reasoningTokens=otelReasoning;values.reasoningSource='gen_ai.usage.reasoning_tokens';}
+      else values.reasoningSource='ai.usage.reasoningTokens / gen_ai.usage.reasoning_tokens';
+    }
     out.reasoning = extractReasoning(props, 'run.span');
     const promptOptions = get(props, 'ai.prompt.providerOptions');
-    if (promptOptions !== undefined) out.reasoning.push(...extractReasoning({providerOptions:promptOptions}, 'run.span'));
+    if (promptOptions !== undefined) out.reasoning.push(...extractReasoning({providerOptions:promptOptions}, 'run.span', '$.ai.prompt'));
     let meta = get(props, 'ai.response.providerMetadata');
     if (typeof meta === 'string' && meta.length < 65536) { try { meta = JSON.parse(meta); } catch { meta = null; } }
     if (meta && typeof meta === 'object') out.providerMeta = metaShape(meta);
@@ -333,7 +356,7 @@ function sanitizeDetail(input) {
     for (const name of ['providerMeta', 'providerOptions']) { const m = s[name]; if (m && typeof m === 'object' && !Array.isArray(m)) { const clean = {}; let n = 0; for (const [k, v] of Object.entries(m)) { if (n++ >= META_LIMITS.entries) break; if (typeof k !== 'string' || k.length > 250) continue; if(SECRET_KEY.test(k)){clean[k]='<redacted>';continue;} if (typeof v === 'number' && Number.isFinite(v) || typeof v === 'boolean' || v === null) clean[k] = v; else if (typeof v === 'string' && v.length <= META_LIMITS.string && !/\s/.test(v) && !/^eyJ/.test(v) || typeof v === 'string' && /^<[a-z]+(:\d+)?>$/.test(v)) clean[k] = v; } if (Object.keys(clean).length) entry[name] = clean; } }
     if (s.kind === 'stream' && Array.isArray(s.reasoning)) entry.reasoning = s.reasoning.slice(0,60).filter(e => e && ['effort','budget','mode'].includes(e.kind)).flatMap(e => {
       const config = e.kind === 'effort' ? {reasoning_effort:e.level || '[unsupported]'} : e.kind === 'budget' ? {thinking:{budget_tokens:e.value}} : {thinking:{type:e.value}};
-      return extractReasoning(config, 'run.span');
+      return extractReasoning(config, 'run.span').map(row=>({...row,path:__req("reasoning").cleanReasoningPath(e.path)||null}));
     });
     spans.push(applyReasoningUsage(entry));
   }
@@ -2724,7 +2747,7 @@ function beginTurn(url = '') {
 function recordReasoning(obj, source, url) {
   for (const config of extractReasoning(obj, source)) {
     if (BUS.evidence.some(e => e.source === 'reasoning.config' && JSON.stringify(e.config) === JSON.stringify(config))) continue;
-    BUS.push({ source: 'reasoning.config', config, url, t: now() });
+    BUS.push({ source: 'reasoning.config', config, url, pageUrl:location.origin+location.pathname, generation:BUS.generation, t: now() });
   }
 }
 function inspectRequest(body, url) {
@@ -4459,6 +4482,7 @@ function runCanaries(text) {
   exp.runCanaries = runCanaries;
 } };
 __mods["ui"] = { fn: function (exp) {
+const modelLabel = __req("reasoning").modelLabel;
 /**
  * ui.js — 轻量 HUD（Shadow DOM 隔离，不污染页面样式）
  *
@@ -4630,6 +4654,7 @@ class HUD {
     const facts = extras.reasoningFacts || {};
     const reasoning = extras.reasoning || facts.effort || {};
     const observation = facts.observation || {};
+    const ambiguous = facts.coverage === 'ambiguous' || (facts.traceDetail?.calls?.length || 0) > 1 || (extras.realModel?.all?.length || 0) > 1;
     const observedLabel = observation.status === 'conflict' ? '冲突（来源数值不一致）'
       : observation.status === 'reported-positive' ? `${observation.tokens} tokens（报告值 > 0）`
       : observation.status === 'reported-zero' ? '0 tokens（报告值，不等于证明未思考）' : '未提供';
@@ -4646,10 +4671,10 @@ class HUD {
     const realBlock = real
       ? `<div class="verdict real">
             <div class="mode">${real.historical ? '本会话最近保存的模型标签' : '运行记录中的模型标签'}</div>
-            <div class="model">${esc(real.name)}</div>
+            <div class="model">${esc(modelLabel(real.name, reasoning, {historical:real.historical, ambiguous}))}</div>
             <div class="ev mono">runId: ${esc(real.runId || '-')}${real.tokens && real.tokens.length ? ' · tokens ' + esc(real.tokens.join(',')) : ''}</div>
             ${real.all && real.all.length > 1
-              ? `<div class="ev">本轮出现: ${esc(real.all.join(', '))}</div>` : ''}
+              ? `<div class="ev">本轮出现: ${esc(real.all.map(name=>modelLabel(name, {}, {historical:real.historical, ambiguous:true})).join(', '))}</div>` : ''}
           </div>`
       : (extras.runInfo
         ? `<div class="verdict notice">
@@ -4660,7 +4685,7 @@ class HUD {
 
     const altHtml = (vd.alternatives || []).length
       ? `<div class="sec">备选</div>` + vd.alternatives.map(a =>
-        `<div class="row"><span class="k">${esc(a.family || '?')}</span><span class="v">${esc(a.modelId)} · ${Math.round(a.confidence * 100)}%</span></div>`).join('')
+        `<div class="row"><span class="k">${esc(a.family || '?')}</span><span class="v">${esc(modelLabel(a.modelId))} · ${Math.round(a.confidence * 100)}%</span></div>`).join('')
       : '';
 
     const evHtml = (vd.evidence || []).slice(0, 7).map(e => {
@@ -4680,7 +4705,7 @@ class HUD {
 
     const slotHtml = extras.slots && Object.keys(extras.slots).length
       ? `<div class="sec">盲测槽位</div>` + Object.entries(extras.slots).map(([s, d]) =>
-        `<div class="row"><span class="k">模型 ${esc(s)}</span><span class="v">${esc(d.label || d.modelId || '未识别')}${d.confidence ? ' · ' + Math.round(d.confidence * 100) + '%' : ''}</span></div>`).join('')
+        `<div class="row"><span class="k">模型 ${esc(s)}</span><span class="v">${esc(modelLabel(d.label || d.modelId || '未识别'))}${d.confidence ? ' · ' + Math.round(d.confidence * 100) + '%' : ''}</span></div>`).join('')
       : '';
 
     // Save the actual scroll containers before innerHTML replaces them on every update.
@@ -4704,7 +4729,7 @@ class HUD {
         ${realBlock}
         <section class="verdict primary" aria-label="模型判定">
           <div class="mode">模型判定 · ${esc(vd.mode)}</div>
-          <div class="model">${esc(vd.label || vd.modelId || '未识别')}</div>
+          <div class="model">${esc(v ? modelLabel(vd.label || vd.modelId || '未识别', reasoning, {historical:vd.source === 'conversation.history', ambiguous}) : vd.label)}</div>
           ${vd.modelId && vd.label && vd.modelId !== vd.label ? `<div class="ev mono">id: <b>${esc(vd.modelId)}</b></div>` : ''}
           <div class="bar" role="progressbar" aria-label="判定规则分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0,Math.min(100,conf))}"><i style="width:${Math.max(0,Math.min(100,conf))}%"></i></div>
           <div class="meta">
@@ -5556,6 +5581,7 @@ __mods["notifier"] = { fn: function (exp) {
       turnActive = true;
       turnGeneration = gen;
       turnStartTime = Date.now();
+      try { opts.onTurnStart?.({generation:gen}); } catch {}
       hadContent = false;
       hadDomGenerating = false;
       if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
@@ -5615,6 +5641,7 @@ __mods["notifier"] = { fn: function (exp) {
           onTurnStart({ generation: BUS.generation });
           hadContent = true;
         }
+        try { opts.onTurnProgress?.(); } catch {}
         if (evt.data?.complete) {
           checkCompletion('observation-complete');
         }
@@ -5625,6 +5652,7 @@ __mods["notifier"] = { fn: function (exp) {
     if (typeof document !== 'undefined') {
       let wasDomGen = false;
       setInterval(() => {
+        try { opts.onTurnProgress?.(); } catch {}
         const domGen = isDomGenerating();
         if (domGen) {
           if (!turnActive) {
@@ -5782,6 +5810,57 @@ __mods["notifier"] = { fn: function (exp) {
       at: new Date().toISOString(),
     });
   }
+  /** One best-effort server notification per normal turn, independent of local audio. */
+  function createCompletionBroadcastGate() {
+    let turn = null, lastGeneration = -1;
+    function context() {
+      try {
+        const accounts = window.__ARENA_USERSCRIPT__?.accounts;
+        const account = accounts?.scope?.();
+        const validAccount = !!account && !accounts?.requiresReload?.();
+        const match = location.origin === 'https://arena.ai'
+          ? /^\/agent\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i.exec(location.pathname || '') : null;
+        const sessionId = match ? match[1].toLowerCase() : null;
+        const landing = location.origin === 'https://arena.ai' && /^\/agent\/?$/.test(location.pathname || '');
+        const runner = window.__AMP_PAGE_GACHA__;
+        const gacha = runner?.state ? runner.state().status === 'running' : !!window.__AMP_GACHA_OWNER__;
+        return {account, validAccount, sessionId, landing, gacha};
+      } catch { return {validAccount:false, gacha:true}; }
+    }
+    function start(info = {}) {
+      const generation = info.generation;
+      if (!Number.isSafeInteger(generation) || generation <= 0 || generation <= lastGeneration) return;
+      const c = context();lastGeneration = generation;
+      turn = {generation, account:c.account, sessionId:c.sessionId, done:false,
+        blocked:!c.validAccount || (!c.sessionId && !c.landing), gacha:c.gacha};
+    }
+    function observe() {
+      if (!turn || turn.done) return;
+      const c = context();
+      turn.gacha = turn.gacha || c.gacha;
+      if (!c.validAccount || c.account !== turn.account || BUS.generation !== turn.generation) turn.blocked = true;
+      if (turn.sessionId) { if (c.sessionId !== turn.sessionId) turn.blocked = true; }
+      else if (c.sessionId) turn.sessionId = c.sessionId; // create-chat redirects /agent to its new UUID.
+      else if (!c.landing) turn.blocked = true;
+    }
+    async function complete(info = {}) {
+      try {
+        if (!turn || turn.done || info.generation !== turn.generation) return false;
+        observe();turn.done = true; // Mark before fetch: duplicate completion/failure never retries.
+        if (turn.blocked || turn.gacha || !turn.sessionId) return false;
+        return await broadcast({
+          title:'Arena 会话生成结束', content:'当前会话已完成生成，请返回页面查看。',
+          level:'success', source:'arena-model-probe', event:'session-completed',
+          sessionId:turn.sessionId, url:'https://arena.ai/agent/'+turn.sessionId,
+          generation:turn.generation,
+          durationMs:Number.isSafeInteger(info.durationMs) && info.durationMs >= 0 ? info.durationMs : null,
+          at:new Date().toISOString(),
+        });
+      } catch { return false; }
+    }
+    return {start, observe, complete};
+  }
+  exp.createCompletionBroadcastGate = createCompletionBroadcastGate;
   exp.broadcast = broadcast;
   exp.broadcastHit = broadcastHit;
   exp.broadcastStop = broadcastStop;

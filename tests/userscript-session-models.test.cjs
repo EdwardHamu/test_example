@@ -199,7 +199,7 @@ test('generated userscript contains no old rename action, and privileged host sc
   const helper=fs.readFileSync(path.join(root,'userscript-build/session-model-transport.candidate.js'),'utf8');
   assert.match(built,/@grant\s+none/);assert.doesNotMatch(built,/@connect\s+meamoe\.top/);
   assert.match(helper,/@grant\s+GM_xmlhttpRequest/);assert.match(helper,/@connect\s+meamoe\.top/);
-  assert.match(built,/@version\s+2026\.09\.25\.28/);
+  assert.match(built,/@version\s+2026\.09\.26\.3/);
   assert.doesNotMatch(built,/hitRename|renameMenuClick|renameFill|renameSave|renameDialog/);
   assert.doesNotMatch(helper,/@connect\s+\*/);
   assert.ok(built.includes(source.trim()));

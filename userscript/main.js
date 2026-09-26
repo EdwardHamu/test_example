@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 模型助手 · Assets 整合版
 // @namespace    arena-model-companion.local
-// @version      2026.09.25.28
+// @version      2026.09.26.3
 // @description  页面主环境模型探针、抽卡、通知及会话显示；会话模型跨域同步需另装助手脚本
 // @match        https://arena.ai/*
 // @match        https://10minutemail.one/*
@@ -16,7 +16,7 @@
 'use strict';
 if(window.top!==window||!['arena.ai','10minutemail.one'].includes(location.hostname))return;
 if(window.__ARENA_USERSCRIPT__)return;
-const api=window.__ARENA_USERSCRIPT__={version:'2026.09.25.28',loaded:[],errors:[]};
+const api=window.__ARENA_USERSCRIPT__={version:'2026.09.26.3',loaded:[],errors:[]};
 function load(name,fn){try{const result=fn();api.loaded.push(name);return result;}catch(e){api.errors.push({name,message:String(e.message||e)});console.warn('[Arena userscript]',name,e);}}
 load('AuthBridge.js',()=>{
 __BUILD_AUTH__
@@ -41,6 +41,7 @@ if(api.accounts)api.balance=()=>api.accounts.balanceSnapshot();
 load('arena-model-probe.inject.js',()=>{
 __BUILD_PROBE__
 });
+load('userscript-reasoning.js',()=>__BUILD_REASONING__(api));
 load('userscript-session-models.js',()=>__BUILD_MODELS__(api));
 __BUILD_USAGE__(api);
 load('userscript-task-review-hider.js',()=>__BUILD_REVIEW__(api));

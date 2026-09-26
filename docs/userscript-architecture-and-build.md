@@ -1,5 +1,11 @@
 # Arena 用户脚本：整体架构与打包指南
 
+> 2026.09.26.3：普通会话完成且非抽卡轮次时向现有通知接口广播，复用 notifier 完成检测与 broadcast，通过 probe 补丁接入；源码模块仍为 16 个。详见 [普通会话完成通知](userscript-session-completion-broadcast.md)。
+
+> 2026.09.26.2：探针模型标题与思考等级检查卡片统一显示“模型名 · 思考等级”。显式值之外标注未知/冲突/不支持；历史记录和多调用概览不套用当前档位。仅展示变化，不改模型 ID 或同步数据。
+
+> 2026.09.26.1：移植 Native Suite 思考等级检查面板，新增 REASONING（tools/userscript-reasoning.js），在 PROBE 后静态加载；当前共 16 个源码模块、13 个 load 包装模块。manifest 新增 reasoningInspector。详细范围、字段来源和验收见 [思考等级移植说明](userscript-reasoning-inspector.md)。下文旧模块计数是历史架构快照。
+
 > 2026.09.25.28：取消 composer 最高 z-index 修改，其余强制显示逻辑不变。更新后须刷新页面以清除旧版内联样式。
 
 > 2026.09.25.27：置底开关仅在检测到生成中时生效，完成后停止；用户上滚不暂停，账号校验不联动。详见 docs/userscript-force-follow.md。

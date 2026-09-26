@@ -36,5 +36,9 @@ replaceOnce('次要目标 sol / opus / gemini 不停止，等待40秒再继续',
 // Remove completion-triggered Escape; keep notifications/cooldown and manual Escape unchanged.
 replaceOnce("      if (notifier.isAutoEscEnabled()) {\n        const ok = notifier.triggerEscapeKey();\n        state.hud?.log(ok ? '已自动触发 Esc；下一轮抽卡仍需等待冷却结束。' : 'Esc 触发失败；下一轮抽卡仍需等待冷却结束。');\n      }".replace(/\n/g, probe.includes("\r\n") ? "\r\n" : "\n"), "      // Auto Escape is driven by composer disappearance (userscript-composer-auto-esc.js)." );
 
+// Reuse the existing debounced completion watcher; no second detector.
+replaceOnce("  notifier.initSessionWatcher({", "  const completionBroadcast = notifier.createCompletionBroadcastGate();\n  notifier.initSessionWatcher({\n    onTurnStart: completionBroadcast.start,\n    onTurnProgress: completionBroadcast.observe,");
+replaceOnce("    onSessionEnd: (info) => {", "    onSessionEnd: (info) => {\n      void completionBroadcast.complete(info);");
+
 return probe;
 };
