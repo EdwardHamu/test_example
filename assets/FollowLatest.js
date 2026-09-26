@@ -4,7 +4,8 @@
   const label = el => ((el && (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent)) || '').trim().replace(/\s+/g, ' ');
   const testing = window.__arenaFollowLatestTest === true;
   const STORAGE_KEY = 'arena-force-follow-bottom';
-  let wanted = window.__arenaFollowLatestWanted === true;
+  // Default to enabled while preserving an explicit in-page opt-out and the saved preference.
+  let wanted = window.__arenaFollowLatestWanted !== false;
   try { const saved=localStorage.getItem(STORAGE_KEY);if(saved!==null)wanted=saved==='true'; } catch (_) {}
 
   const CLICK_MS = 1200;
@@ -185,6 +186,7 @@
     activeScroller = null;
     resizeObserver?.disconnect();
     resizeTargets = [];
+    window.removeEventListener?.('keydown', onKeydown, true);
     return { ok: true, enabled: false, suspended: true, clicked: false };
   }
   state.stick = stick;
@@ -192,7 +194,16 @@
   state.suspend = suspend;
   state.jumpButton = jumpButton;
   state.logEl = logEl;
+  function onKeydown(event) {
+    if (!event || !event.altKey || event.ctrlKey || event.metaKey || String(event.key).toLowerCase() !== 'v') return;
+    const target = event.target;
+    if (target?.isContentEditable || /^(?:input|textarea|select)$/i.test(target?.tagName || '')) return;
+    event.preventDefault?.(); event.stopPropagation?.();
+    setEnabled(!state.enabled);
+  }
+  state.keyHandler = onKeydown;
   if (window.__arenaFollowLatestTest) return state;
+  window.addEventListener?.('keydown', onKeydown, true);
   let scheduled = false;
   function schedule() {
     if (scheduled || state.suspended) return;

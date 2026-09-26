@@ -1,4 +1,6 @@
-# 账号切换 Cookie 兼容修复（2.0.5）
+# 账号切换 Cookie 兼容修复（2.0.6）
+
+> 2026.09.26：修复清理 Cookie 时始终使用固定 `arena.ai` URL 的问题；现在删除和写入都根据 Cookie 的实际域名和路径生成匹配 URL，避免子域/路径 Cookie 被浏览器拒绝。
 
 ## 问题与证据边界
 
@@ -27,7 +29,7 @@
 
 ## 提示与使用方法
 
-更新现有 `Arena-Account-Switch.user.js` 到 2.0.5，保留原 namespace，不要另建重复脚本；刷新旧 Arena 标签页，让旧实例退出。
+更新现有 `Arena-Account-Switch.user.js` 到 2.0.6，保留原 namespace，不要另建重复脚本；刷新旧 Arena 标签页，让旧实例退出。
 
 - `COOKIE_READ_FAILED` / `COOKIE_SET_FAILED` / `COOKIE_DELETE_FAILED`：分别是完整读取、写入、清理失败。
 - `COOKIE_TIMEOUT`：扩展调用未及时完成，停止后续步骤；应刷新并核对当前登录状态。

@@ -5,10 +5,10 @@
     "PageBridge.js": "f51cb3967f4364b20e4a1521d635cbe9e907e71c7b827b28d61509309d64bd2c",
     "CandidateBridge.js": "c17e5c32e2b8f8b24cbd099f761e383caaec103f3812b90a01e4321d65cb80e7",
     "ConversationRecovery.js": "3305003f6676872708d7fcc6ba1abb73c8bb5a5f73c98f3dacebc409c72228a8",
-    "FollowLatest.js": "dfce36e464804b06fb8b970ed6f2bc87a8817ab45be7aab24720ddd575388b80",
+    "FollowLatest.js": "016f081562a0eda5f039348459d97f913b882c7f720e728f87306619538f2329",
     "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
     "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
-    "arena-model-probe.inject.js": "883a4e547a151e24de7fe5e5e83afc234903a782900acd35d74233d7e38f4b3f"
+    "arena-model-probe.inject.js": "0f02c55b995b8fbd8d27f5daa54fe6774c39e395b6bce5b7bdaca128cf755c5f"
   },
   "modularSources": {
     "userscript/main.js": "39de11cc73764ef110844ac4aab74def4990cec8f65bbc31d27f4828d14f26fe",
@@ -34,8 +34,8 @@
   "taskReviewHider": "8290ee0c1984f09997d38d0b450afc218fd7fb1a6d3b0c093f96c0c79a243b77",
   "composerVisibility": "3a45c983411ea2d08753752eab035fb813b7cc51ab45ace00e52f00ed966d273",
   "composerAutoEsc": "8acfac52597ad67c712c6397d0ada7f0a8b59a717bc00808fe629e726c26dcf0",
-  "outputSha256": "ef1ffa7df1d7d50974b3ef37b03ea517c0e85705c3d32e5f383462b3beecea46",
-  "bytes": 557647,
+  "outputSha256": "bd04810f29c16626a073a637e29344101710cbc2256aa00b54504a2f9a631560",
+  "bytes": 550439,
   "transportSha256": "fc68baae09c1a35c7bc1ebaa7b7d7e3ad06ecf71c07f76ac58b62abf2a8ee6b7",
   "transportBytes": 4870
 }

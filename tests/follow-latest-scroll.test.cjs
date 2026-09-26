@@ -47,7 +47,8 @@ function fixture({stop = false, scrollOn = 'log', storage = new Map()} = {}) {
     constructor(callback) { this.callback = callback; observers.push(this); }
     observe(target, options) { this.target = target; this.options = options; }
   }
-  const context = vm.createContext({window:{}, document, location, MutationObserver, ResizeObserver,
+  const keyListeners = new Map(), window = {addEventListener:(type,fn)=>keyListeners.set(type,fn),removeEventListener:(type,fn)=>keyListeners.delete(type)},
+    context = vm.createContext({window, document, location, MutationObserver, ResizeObserver,
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v)},
     getComputedStyle:el=>({visibility:el.hidden?'hidden':'visible', overflowY:el.overflowY}),
     setInterval:(callback,ms)=>{intervals.push({callback,ms});return intervals.length;},
@@ -58,15 +59,17 @@ function fixture({stop = false, scrollOn = 'log', storage = new Map()} = {}) {
     context,storage,api:context.window.__arenaFollowLatest, intervals,frames,observers,resizers,
     tick() { intervals[0].callback(); },
     mutate() { observers[0].callback([{type:'characterData', target:log}]); },
-    flush() { for (const callback of frames.splice(0)) callback(); }};
+    flush() { for (const callback of frames.splice(0)) callback(); },
+    key(event) { keyListeners.get('keydown')?.(event); }};
 }
 
 
-test('switch off means no scrolling even while generating',()=>{const h=fixture({stop:true});h.log.scrollHeight=1000;h.tick();h.mutate();h.flush();assert.equal(h.log.scrollTop,25);assert.equal(h.api.enabled,false);});
+test('switch off means no scrolling even while generating',()=>{const h=fixture({stop:true});h.api.setEnabled(false);h.flush();h.log.scrollTop=25;h.log.scrollHeight=1000;h.tick();h.mutate();h.flush();assert.equal(h.log.scrollTop,25);assert.equal(h.api.enabled,false);});
 test('switch on pins while a generation stop button is present',()=>{const h=fixture({stop:true});h.api.setEnabled(true);assert.equal(h.log.scrollTop,400);h.log.scrollHeight=1000;h.mutate();h.flush();assert.equal(h.log.scrollTop,800);assert.equal(h.main.scrollTop,43);assert.equal(h.hud.scrollTop,55);});
 test('user upward scrolling always snaps back and never pauses',()=>{const h=fixture({stop:true});h.api.setEnabled(true);h.log.scrollTop=50;h.log.dispatchScroll();h.flush();assert.equal(h.log.scrollTop,400);assert.equal(h.api.userPaused,false);h.log.scrollTop=20;h.tick();assert.equal(h.log.scrollTop,400);});
 test('disabling immediately stops pending frame and polling writes',()=>{const h=fixture({stop:true});h.api.setEnabled(true);h.log.scrollTop=30;h.log.dispatchScroll();h.api.setEnabled(false);h.flush();h.tick();assert.equal(h.log.scrollTop,30);});
-test('preference survives reload; missing storage defaults off',()=>{const h=fixture({stop:true});h.api.setEnabled(true);assert.equal(h.storage.get('arena-force-follow-bottom'),'true');const next=fixture({stop:true,storage:h.storage});assert.equal(next.api.enabled,true);assert.equal(next.log.scrollTop,400);next.api.setEnabled(false);assert.equal(fixture({stop:true,storage:h.storage}).api.enabled,false);});
+test('preference survives reload; missing storage defaults on',()=>{const h=fixture({stop:true});assert.equal(h.api.enabled,true);h.api.setEnabled(true);assert.equal(h.storage.get('arena-force-follow-bottom'),'true');const next=fixture({stop:true,storage:h.storage});assert.equal(next.api.enabled,true);assert.equal(next.log.scrollTop,400);next.api.setEnabled(false);assert.equal(fixture({stop:true,storage:h.storage}).api.enabled,false);});
+test('Alt+V toggles the follow switch and persists the choice',()=>{const h=fixture({stop:true}),event={altKey:true,ctrlKey:false,metaKey:false,key:'v',target:{tagName:'BODY'},preventDefault(){this.prevented=true;},stopPropagation(){}};h.key(event);assert.equal(h.api.enabled,false);assert.equal(event.prevented,true);assert.equal(h.storage.get('arena-force-follow-bottom'),'false');h.key(event);assert.equal(h.api.enabled,true);});
 test('real scrollable transcript ancestor is pinned, not inert inner log',()=>{const h=fixture({stop:true,scrollOn:'parent'});h.api.setEnabled(true);assert.equal(h.parent.scrollTop,600);assert.equal(h.log.scrollTop,25);assert.equal(h.main.scrollTop,43);});
 test('layout shrink cannot become a sticky manual pause',()=>{const h=fixture({stop:true});h.api.setEnabled(true);h.log.scrollHeight=400;h.log.scrollTop=200;h.log.scrollHeight=800;h.tick();assert.equal(h.log.scrollTop,600);assert.equal(h.api.userPaused,false);});
 test('resize events follow composer changes and content growth',()=>{const h=fixture({stop:true}),content=element();h.log.firstElementChild=content;h.api.setEnabled(true);assert.ok(h.resizers[0].targets.includes(content));h.log.clientHeight=150;h.resizers[0].callback();h.flush();assert.equal(h.log.scrollTop,450);h.log.scrollHeight=900;h.resizers[0].callback();h.flush();assert.equal(h.log.scrollTop,750);});

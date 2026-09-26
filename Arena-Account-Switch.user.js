@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      2.0.5
+// @version      2.0.6
 // @description  服务端账号保险库：账号、Cookie、可选密码、额度和快捷键远程存储，按需读取与安全切换
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -23,7 +23,7 @@
 
 (function arenaAccountSwitch() {
   'use strict';
-  const VERSION = '2.0.5';
+  const VERSION = '2.0.6';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
@@ -819,10 +819,19 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     return out;
   }
   const authOf = cookies => cookies.filter(c => AUTH_RE.test(c.name)).sort((a, b) => (+(a.name.split('.')[1] || -1)) - (+(b.name.split('.')[1] || -1)));
-  function delCookie(c) { return cookieCall('delete',{url:ORIGIN+(c.path||'/'),name:c.name}); }
+  function cookieURL(c) {
+    // Cookie APIs require the deletion URL to match the cookie's actual host/path.
+    // Using only ORIGIN breaks on host/subdomain-scoped cookies and surfaces as a
+    // misleading generic delete-permission error.
+    const domain = String(c?.domain || location.hostname || location.host).replace(/^\./, '').toLowerCase();
+    const host = domain && /(?:^|\.)arena\.ai$/i.test(domain) ? domain : (location.hostname || location.host);
+    const path = typeof c?.path === 'string' && c.path.startsWith('/') ? c.path : '/';
+    return 'https://' + host + path;
+  }
+  function delCookie(c) { return cookieCall('delete',{url:cookieURL(c),name:c.name}); }
   function cookieSetDetails(c) {
     assertCookieArray([c]);
-    const d={url:ORIGIN+(c.path||'/'),name:c.name,value:c.value,path:c.path||'/',secure:c.secure!==false,httpOnly:!!c.httpOnly};
+    const d={url:cookieURL(c),name:c.name,value:c.value,path:c.path||'/',secure:c.secure!==false,httpOnly:!!c.httpOnly};
     // Omit Domain for current-host __Host- Cookies, even if a legacy snapshot omitted hostOnly.
     // A foreign scope is still passed to browser validation, never silently moved to this host.
     const hostPrefix=c.name.startsWith('__Host-')&&(!c.domain||c.domain.replace(/^\./,'').toLowerCase()===(location.hostname||location.host).toLowerCase());
