@@ -24,6 +24,31 @@ test('expired changes cursor re-fetches authoritative snapshot',async()=>{const 
 test('401 clears loaded metadata and disables connection',async()=>{const c=await connected();await c.v.create({email:'a@b.c'});c.server.key='B'.repeat(43);await assert.rejects(c.v.refresh(),e=>e.status===401);assert.equal(c.v.ready(),false);assert.equal(c.v.accounts().length,0);});
 test('late response from old connection cannot repopulate metadata',async()=>{const c=await connected();await c.v.create({email:'a@b.c'});let release;c.server.block=r=>r.url.endsWith('/accounts')?new Promise(r=>{release=r}):undefined;const pending=c.v.refresh();await new Promise(r=>setImmediate(r));await c.v.disconnect();release();await assert.rejects(pending,e=>e.code==='CONNECTION_CHANGED');assert.equal(c.v.accounts().length,0);});
 test('hotkeys persist through settings and tags, preserving unrelated tags',async()=>{const c=await connected();const a=await c.v.create({email:'a@b.c',tags:['work']});await c.v.saveHotkeys({panel:'F2',accounts:{'a@b.c':'Alt+KeyA'}});assert.equal(c.v.hotkeys().panel,'F2');assert.deepEqual(c.v.find(a.id).tags,['work','amp-hotkey:Alt+KeyA']);assert.equal(c.writes.length,1);});
-test('client double-checks hostile cookie bundles before Cookie API access',()=>{const{v}=client();for(const patch of [{domain:'evil.test'},{path:'/other'},{secure:false},{name:'unrelated'},{value:'x; cookie=injected'}])assert.throws(()=>v.validateBundle(bundle([{...cookie(),...patch}])));assert.throws(()=>v.validateBundle(bundle([cookie(),cookie()])));assert.throws(()=>v.validateBundle(bundle([{...cookie(),name:'arena-auth-prod-v1.1'}])));assert.throws(()=>v.validateBundle(bundle([cookie(),{...cookie(),name:'arena-auth-prod-v1.0'}])));});
-test('bundle byte-size limit is UTF-8, not JavaScript character count',()=>{const{v}=client();assert.throws(()=>v.validateBundle(bundle([{...cookie(),value:'界'.repeat(22000)}])));});
+test('credential bundles pass through reads and writes without local cookie policy validation',async()=>{
+ const c=await connected(),a=await c.v.create({email:'a@b.c'});
+ const variants=[{domain:'other.invalid'},{path:'/custom'},{secure:false},{name:'unrelated'},{value:'x; cookie=value'},{value:''},{httpOnly:'yes'},{expirationDate:-1}];
+ await c.v.withLease(a,async lease=>{
+  let revision=0;for(const patch of variants){const data=bundle([{...cookie(),...patch}]);await lease.write(revision++,data);assert.deepEqual((await lease.read()).bundle,data);}
+  for(const data of [bundle([]),bundle([cookie(),cookie()]),bundle([{...cookie(),name:'arena-auth-prod-v1.7'}]),bundle([cookie(),{...cookie(),name:'arena-auth-prod-v1.0'}]),{...bundle([cookie()]),schemaVersion:9},bundle(Array.from({length:33},()=>cookie())),bundle([{...cookie(),value:'界'.repeat(22000)}])]){
+   await lease.write(revision++,data);assert.deepEqual((await lease.read()).bundle,data);
+  }
+ });assert.equal(c.v.validateBundle,undefined);
+});
+test('all supplied Cookie names and nonstandard attributes are retained',()=>{
+ const {v}=client(),data=v.bundle([{...cookie(),domain:'other.invalid',path:'/custom',secure:false},{name:'unrelated',value:'not-collected'}],null);
+ assert.equal(data.cookies.length,2);assert.equal(data.cookies[1].name,'unrelated');assert.equal(data.cookies[0].domain,'other.invalid');assert.equal(data.cookies[0].path,'/custom');assert.equal(data.cookies[0].secure,false);
+});
+
 test('final URL mismatch fails closed; token is only sent to fixed API base',async()=>{const s=fixture(),c=client(s,{send:async r=>({...await s.send(r),finalUrl:'https://other.invalid/'})});await assert.rejects(c.v.connect(link),e=>e.code==='REDIRECT_BLOCKED');assert.equal(c.writes.length,0);});
+
+test('server credential rejection still propagates rather than being treated as a local format failure',async()=>{const server=fixture(),c=client(server,{send:async r=>r.method==='PUT'&&r.url.endsWith('/credentials')?{status:400,body:{code:400,data:{errorCode:'INVALID_COOKIE_BUNDLE'}}}:server.send(r)});await c.v.connect(link);const a=await c.v.create({email:'a@b.c'});await assert.rejects(c.v.withLease(a,l=>l.write(0,bundle([cookie()]))),e=>e.status===400&&e.code==='INVALID_COOKIE_BUNDLE');assert.equal(server.leases.size,0);});
+
+
+test('connection guard pins a multi-step job even across a same-key reconnect',async()=>{
+ const c=await connected(),guard=c.v.connectionGuard();assert.doesNotThrow(guard);
+ await c.v.connect(link);assert.throws(guard,e=>e.code==='CONNECTION_CHANGED');assert.doesNotThrow(c.v.connectionGuard());
+});
+test('connection guard rejects a disconnect or an authentication failure',async()=>{
+ const c=await connected(),first=c.v.connectionGuard();await c.v.disconnect();assert.throws(first,e=>e.code==='CONNECTION_CHANGED');
+ await c.v.connect(link);const second=c.v.connectionGuard();c.server.key='B'.repeat(43);await assert.rejects(c.v.refresh());assert.throws(second,e=>e.code==='CONNECTION_CHANGED');
+});

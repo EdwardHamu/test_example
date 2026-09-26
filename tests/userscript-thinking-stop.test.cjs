@@ -1,0 +1,31 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const root=path.resolve(__dirname,'..'),source=fs.readFileSync(path.join(root,'tools/userscript-thinking-stop.js'),'utf8'),fixture=fs.readFileSync(path.join(__dirname,'fixtures/thinking-control.html'),'utf8');
+const paths=[...fixture.matchAll(/<path d="([^"]+)"/g)].map(m=>m[1]);
+function visible(extra={}){return {parentElement:null,hidden:false,getClientRects(){return this.hidden?[]:[{}];},closest(){return null;},...extra};}
+function message(id='new',text='Thought for 1 second',{brain=true,hidden=false,prose=false,reversed=false}={}){
+ const label=visible({tagName:'P',textContent:text}),svg=visible({tagName:'svg',querySelectorAll:()=>brain?paths.map(d=>({getAttribute:()=>d})):[]});
+ const button=visible({hidden,children:reversed?[label,svg]:[svg,label],closest:s=>s==='pre,code,.prose'&&prose?{}:null});
+ return visible({id,button,getAttribute:()=>id,querySelectorAll:s=>{assert.equal(s,'.not-prose > button[aria-expanded][aria-controls]');return [button];}});
+}
+function setup({initial=[],generating=true,gacha=false,account='a'}={}){
+ let rows=initial,active=generating,running=gacha,scope=account,reload=false,clicks=0,notify=[],observerCallback=null,turnListener=null,disposed=false;
+ const bus={generation:1,on:fn=>turnListener=fn},location={hostname:'arena.ai',origin:'https://arena.ai',pathname:'/agent/11111111-1111-1111-1111-111111111111'};
+ const stop=visible({disabled:false,getAttribute:()=> 'Stop generating',click(){clicks++;}});
+ const probe={bus,broadcastThinkingDetected:(...args)=>{notify.push(args);return Promise.resolve(false);}};
+ const window={__MODEL_PROBE__:probe,__AMP_PAGE_GACHA__:{state:()=>({status:running?'running':'idle'})},addEventListener(){}};
+ const document={documentElement:{},addEventListener(){},querySelectorAll:s=>s==='main [data-agent-transcript-message][data-chat-message-id]'?rows:active?[stop]:[]};
+ const api={accounts:{scope:()=>scope,requiresReload:()=>reload}};
+ vm.runInNewContext(source,{window,document,location,getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'}),MutationObserver:class{constructor(fn){observerCallback=fn;}observe(o,opts){assert.equal(opts.characterData,true);}disconnect(){disposed=true;}},setInterval:()=>1,clearInterval(){}})(api);
+ return {api,bus,location,probe,window,stop,rows:v=>rows=v,gacha:v=>running=v,account:v=>scope=v,reload:v=>reload=v,active:v=>active=v,clicks:()=>clicks,notifications:()=>notify,mutation:()=>observerCallback(),scan:()=>api.thinkingStop.scan(),next(){bus.generation++;turnListener({kind:'turn-start',data:{generation:bus.generation}});},disposed:()=>disposed};
+}
+test('sanitized fixture comes from a brain disclosure control, not answer contents',()=>{assert.match(fixture,/aria-expanded="false"/);assert.match(fixture,/Thought for 1 second/);assert.ok(paths.length>=11);assert.ok(!fixture.includes('The user is asking'));});
+for(const text of ['Thinking','Thinking…','Thinking...','Thought','Thought for 1 second','Thought for 2 minutes','THOUGHT FOR 1 SECOND'])test('brain + '+text+' stops immediately on mutation and sends once',()=>{const e=setup();e.rows([message('new',text)]);e.mutation();e.scan();assert.equal(e.clicks(),1);assert.equal(e.notifications().length,1);assert.equal(e.notifications()[0][1],true);assert.equal(e.bus.thinkingStop.generation,1);});
+for(const [title,options,text]of [['missing brain',{brain:false},'Thinking'],['hidden',{hidden:true},'Thinking'],['answer prose',{prose:true},'Thinking'],['icon after text',{reversed:true},'Thinking'],['normal prose',{},'I thought about this'],['code-like text',{},'thinkingLevel']])test(title+' does not stop',()=>{const e=setup();e.rows([message('new',text,options)]);e.mutation();assert.equal(e.clicks(),0);assert.equal(e.notifications().length,0);});
+test('history and earlier messages never terminate the active answer',()=>{const old=message('old');const e=setup({initial:[old]});e.scan();assert.equal(e.clicks(),0);e.rows([message('new','Thinking'),message('last','Answer without reasoning')]);e.scan();assert.equal(e.clicks(),0);e.rows([message('old')]);e.scan();assert.equal(e.clicks(),0);});
+test('no active stop control means completed conversation is untouched',()=>{const e=setup({generating:false});e.rows([message()]);e.scan();assert.equal(e.clicks(),0);});
+test('gacha remains excluded after stopping that gacha turn',()=>{const e=setup({gacha:true});e.rows([message()]);e.scan();e.gacha(false);e.scan();assert.equal(e.clicks(),0);e.next();e.rows([message('next')]);e.scan();assert.equal(e.clicks(),1);});
+test('account changes, unverified login, reload and navigation fail closed',()=>{for(const change of [e=>e.account(null),e=>e.account('b'),e=>e.reload(true),e=>e.location.pathname='/agent/22222222-2222-2222-2222-222222222222']){const e=setup();e.rows([message()]);change(e);e.scan();assert.equal(e.clicks(),0);}});
+test('new conversation acquires UUID and newly inserted reply',()=>{const e=setup();e.location.pathname='/agent';e.next();e.rows([message()]);e.location.pathname='/agent/22222222-2222-2222-2222-222222222222';e.scan();assert.equal(e.clicks(),1);});
+test('notification throw cannot prevent stop; stop failure is reported without retry',()=>{let e=setup();e.probe.broadcastThinkingDetected=()=>{throw Error('offline');};e.rows([message()]);e.scan();assert.equal(e.clicks(),1);e=setup();e.stop.click=()=>{throw Error('click failure');};e.rows([message()]);e.scan();e.scan();assert.equal(e.notifications().length,1);assert.equal(e.notifications()[0][1],false);});
+test('dispose disconnects the observer and prevents future actions',()=>{const e=setup();e.api.thinkingStop.dispose();e.rows([message()]);e.mutation();assert.equal(e.clicks(),0);assert.equal(e.disposed(),true);});
+test('manifest records the module and bundle includes it',()=>{const manifest=JSON.parse(fs.readFileSync(path.join(root,'userscript-build/manifest.json'),'utf8'));assert.equal(manifest.thinkingStop,require('node:crypto').createHash('sha256').update(source).digest('hex'));assert.ok(fs.readFileSync(path.join(root,'userscript-build/user.candidate.js'),'utf8').includes(source.trim()));});

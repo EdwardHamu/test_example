@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.26.3",
+  "version": "2026.09.26.6",
   "assets": {
     "AuthBridge.js": "4c13810b3399aedb1a34de59ca1111498cb7a9b5303fa1362940be6519b5e750",
     "PageBridge.js": "f51cb3967f4364b20e4a1521d635cbe9e907e71c7b827b28d61509309d64bd2c",
@@ -8,11 +8,11 @@
     "FollowLatest.js": "dfce36e464804b06fb8b970ed6f2bc87a8817ab45be7aab24720ddd575388b80",
     "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
     "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
-    "arena-model-probe.inject.js": "269f4ff6c771403aace9d21cc8b65930edb26c77309ebd9619e1af89a3bbfe66"
+    "arena-model-probe.inject.js": "af545d3664e0372e677cc128ad7f0e192af00bf0fed7b904a51c96ddb58839af"
   },
   "modularSources": {
-    "userscript/main.js": "74c9d17b9a62ef8d0f0e45a155ff22f83ff71fab6cb645e214d76d5b11081eed",
-    "userscript/modules.cjs": "b1af135eb9184f83a0f338475725111698203031bb5db02dfbe652e0607a773a",
+    "userscript/main.js": "653e66dd130190f55ce7dc564a0b00395a3cdbfeec3a9e0195e86c2874c672cf",
+    "userscript/modules.cjs": "8e35919144d566e44f7a549ca087d7f27de91a6cebac043dfcfb42e13d6b05ae",
     "userscript/assemble.cjs": "2d0cd5a41d88c409f2b10782044841ef5fc7a81c460b4a3eae870f90279855ed",
     "userscript/patches/candidate.cjs": "b516f6833d807afb568ec1b5660dbab0b75ed2b5e19315b7af7e1d95b010df23",
     "userscript/patches/probe.cjs": "166a709ce9603e659c0c8bfc08d86759ec18114ebae399e6cdeeb5030f3c4420"
@@ -24,17 +24,18 @@
     "WebView2-LICENSE.txt": "24deadea987f1c7682753a8cef4e70bde8a13cc65684e06cab9a965469362075",
     "WebView2-NOTICE.txt": "9dd2e51ad1f27741d0cbf74227d03fecf55c43e3081501f9d7f553b16d33835e"
   },
-  "adapter": "14d9e227f1ceccc692324378b0019a9fcd857fbbcd73acee7c87c6ff091058f8",
-  "sessionModels": "4efd48587146b9e86007ca30631cfa077b53389a7cee12ae8c53544cd76d623a",
+  "adapter": "b7336bbdbe0007f0c7e2eddbccd75860d6b2db48bdd43fb85a43c36b59825e8e",
+  "sessionModels": "03a769506b67e3f4682b2b77fa6928707745a863f5d23c2f99a18681b2f54756",
   "sessionModelTransport": "d8d8a8867e6fc749c387d8cd1007ebb7ae01265dfc652792f574e6cb66daf1e3",
   "accountCompat": "c9c8569045e085b3595cddc6e36e3f555579369e27f33a0d8a634377c930a9ed",
   "sessionUsage": "0b999a7b980795dfbea6e13301e5fa53a92a5abaa25bca2c8b50fdfcdc2c9a97",
-  "reasoningInspector": "2cdd3f14ba6767b069daf73416580dbbbfbd8574eb287acf0886997b6c36fe79",
+  "reasoningInspector": "178d0c10047bb9e08431eba4e524fd1fbec443d0958a0367ad64c1185213da8c",
+  "thinkingStop": "530ac433b7491830dd61185a28b578aaf21cd632f6bb830b327568374541cade",
   "taskReviewHider": "8290ee0c1984f09997d38d0b450afc218fd7fb1a6d3b0c093f96c0c79a243b77",
   "composerVisibility": "3a45c983411ea2d08753752eab035fb813b7cc51ab45ace00e52f00ed966d273",
   "composerAutoEsc": "8acfac52597ad67c712c6397d0ada7f0a8b59a717bc00808fe629e726c26dcf0",
-  "outputSha256": "21010fe840978bc6abec7219b0ae57eb655d4116875b9044daf3d95e8e97dda5",
-  "bytes": 524098,
-  "transportSha256": "1e7f8966ec254bfbae826b7d6aa2b493bf6ec73b315c1ca506e6e6d506ef0c3f",
+  "outputSha256": "6ef28c3f100d753f74e3281fb9576f2f20f980251be12797a5d08d847589e589",
+  "bytes": 536034,
+  "transportSha256": "015924c24abff30fc94cd4eec1b27aee422a52c310660a520693b888724da308",
   "transportBytes": 4870
 }

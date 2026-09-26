@@ -43,5 +43,17 @@ test('DOM generating blocks watcher completion and DOM polling observes mid-turn
 });
 test('watcher never broadcasts initial idle page without an actual turn',()=>{const e=setup();e.notifier.initSessionWatcher({onTurnStart:e.gate.start,onTurnProgress:e.gate.observe,onSessionEnd:e.gate.complete});e.intervals.forEach(fn=>fn());e.flush();assert.equal(e.calls.length,0);});
 test('candidate uses one existing watcher with completion gate and unchanged module count',()=>{
- const built=fs.readFileSync(path.join(root,'userscript-build/user.candidate.js'),'utf8');assert.equal((built.match(/notifier\.initSessionWatcher\(\{/g)||[]).length,1);assert.match(built,/onTurnStart: completionBroadcast\.start/);assert.match(built,/onTurnProgress: completionBroadcast\.observe/);assert.match(built,/void completionBroadcast\.complete\(info\)/);assert.equal(require('../userscript/modules.cjs').length,16);
+ const built=fs.readFileSync(path.join(root,'userscript-build/user.candidate.js'),'utf8');assert.equal((built.match(/notifier\.initSessionWatcher\(\{/g)||[]).length,1);assert.match(built,/onTurnStart: completionBroadcast\.start/);assert.match(built,/onTurnProgress: completionBroadcast\.observe/);assert.match(built,/void completionBroadcast\.complete\(info\)/);assert.equal(require('../userscript/modules.cjs').length,17);
+});
+
+test('thinking guard sends allowlisted alert and suppresses ordinary completion for same turn only',async()=>{
+ const e=setup({patched:true});e.start();e.bus.thinkingStop={generation:1,url:'https://arena.ai/agent/'+id};
+ assert.equal(await e.notifier.broadcastThinkingDetected(1,true),true);await e.end();assert.equal(e.calls.length,1);const b=e.calls[0].body;
+ assert.equal(b.event,'thinking-detected');assert.equal(b.stopClicked,true);assert.equal(b.url,'https://arena.ai/agent/'+id);assert.ok(!JSON.stringify(b).includes('PRIVATE'));
+ e.start(2);await e.end(2);assert.equal(e.calls.length,2);assert.equal(e.calls[1].body.event,'session-completed');
+});
+test('thinking alert refuses stale or unmarked run and reports click failure honestly',async()=>{
+ const e=setup({patched:true});assert.equal(await e.notifier.broadcastThinkingDetected(1,true),false);
+ e.bus.thinkingStop={generation:1,url:'https://arena.ai/agent/'+id};assert.equal(await e.notifier.broadcastThinkingDetected(2,true),false);
+ await e.notifier.broadcastThinkingDetected(1,false);assert.equal(e.calls[0].body.stopClicked,false);assert.match(e.calls[0].body.content,/失败/);
 });

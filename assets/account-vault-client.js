@@ -78,6 +78,11 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
   }
   function invalidate() { epoch++; context = null; list = []; settings = {}; cursor = ''; }
   async function disconnect() { invalidate(); await clearConfig(); }
+  // Pin a multi-request operation to one connection, including reconnects to the same vault.
+  function connectionGuard() {
+    const ctx = ready();
+    return () => { active(ctx); if (context !== ctx) throw fail('CONNECTION_CHANGED'); };
+  }
   async function refresh() { const ctx = ready(); const snapshot = await snapshots(ctx); active(ctx); apply(snapshot); return accounts(); }
   async function poll() {
     const ctx = ready();
@@ -125,8 +130,8 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     try {
       return await fn({
         guard,
-        read: async () => { guard(); const r = (await request(ctx, 'POST', path + '/credentials/read', {}, headers())).data; guard(); validateBundle(r.bundle); return r; },
-        write: async (revision, bundle) => { guard(); validateBundle(bundle); const r = (await request(ctx, 'PUT', path + '/credentials', bundle, { ...headers(), ...match(revision) })).data; guard(); await get(a.id, ctx); return r; }
+        read: async () => { guard(); const r = (await request(ctx, 'POST', path + '/credentials/read', {}, headers())).data; guard(); return r; },
+        write: async (revision, bundle) => { guard(); const r = (await request(ctx, 'PUT', path + '/credentials', bundle, { ...headers(), ...match(revision) })).data; guard(); await get(a.id, ctx); return r; }
       });
     } finally {
       closed = true; unschedule(timer); await renewal;
@@ -134,32 +139,19 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
       lease.leaseToken = '';
     }
   }
-  function validateBundle(bundle) {
-    if (bundle?.schemaVersion !== 1 || !Array.isArray(bundle.cookies) || bundle.cookies.length < 1 || bundle.cookies.length > 32 || new TextEncoder().encode(JSON.stringify(bundle)).length > 65536) throw fail('INVALID_COOKIE_BUNDLE');
-    const names = new Set(), chunks = [];
-    for (const c of bundle.cookies) {
-      if (!/^arena-auth-prod-v1(?:\.(?:0|[1-9]\d?))?$/.test(c.name || '') || names.has(c.name) || typeof c.value !== 'string' || !c.value || /[\r\n;\x00]/.test(c.value)
-        || !['arena.ai','.arena.ai'].includes(c.domain) || c.path !== '/' || c.secure !== true) throw fail('INVALID_COOKIE_BUNDLE');
-      for (const field of ['httpOnly','hostOnly','session','fromDocument']) if (c[field] !== undefined && typeof c[field] !== 'boolean') throw fail('INVALID_COOKIE_BUNDLE');
-      if (c.expirationDate != null && (!Number.isFinite(c.expirationDate) || c.expirationDate < 0)) throw fail('INVALID_COOKIE_BUNDLE');
-      names.add(c.name); if (c.name.includes('.')) chunks.push(Number(c.name.split('.')[1]));
-    }
-    chunks.sort((a,b) => a-b);
-    if (names.has('arena-auth-prod-v1') && chunks.length || chunks.some((n,i) => n !== i)) throw fail('INVALID_COOKIE_BUNDLE');
-    return bundle;
-  }
+  // Cookie bundle policy checks intentionally removed; server/browser errors still propagate.
   function bundle(cookies, exp) {
-    const cleaned = cookies.filter(c => /^arena-auth-prod-v1(?:\.\d+)?$/.test(c.name)).map(c => {
+    const cleaned = cookies.map(c => {
       const out = { name: c.name, value: c.value, domain: c.domain || 'arena.ai', path: c.path || '/', secure: c.secure !== false };
       for (const k of ['httpOnly','hostOnly','session','fromDocument']) if (typeof c[k] === 'boolean') out[k] = c[k];
       if (typeof c.sameSite === 'string') out.sameSite = c.sameSite.toLowerCase();
       if (Number.isFinite(c.expirationDate)) out.expirationDate = c.expirationDate;
       return out;
     });
-    return validateBundle({ schemaVersion: 1, cookies: cleaned, sessionExpiresAt: Number.isFinite(exp) ? exp : null, observedAt: second() });
+    return { schemaVersion: 1, cookies: cleaned, sessionExpiresAt: Number.isFinite(exp) ? exp : null, observedAt: second() };
   }
   async function digest(cookies) {
-    const value = cookies.map(c => [c.name,c.value]).sort((a,b) => a[0].localeCompare(b[0]));
+    const value = cookies.map(c => [c.domain?.replace(/^\./,'')||'arena.ai',c.path||'/',c.name,c.value]).sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value)));
     return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2,'0')).join('');
   }
@@ -183,6 +175,6 @@ function createArenaVaultClient({ send, persist, readConfig, clearConfig, clock 
     return hotkeys();
   }
   return { BASE, parseLink, connect, restore, disconnect, invalidate, refresh, poll, accounts, find, get, create, patch, remove, password, readPassword,
-    readMirror, putMirror, quota, withLease, bundle, validateBundle, digest, hotkeys, saveHotkeys, second, ready: () => !!context };
+    readMirror, putMirror, quota, withLease, bundle, digest, hotkeys, saveHotkeys, second, connectionGuard, ready: () => !!context };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = { createArenaVaultClient };

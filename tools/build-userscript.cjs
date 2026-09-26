@@ -13,7 +13,7 @@ const transportSource=read('tools/userscript-session-model-transport.js');
 const transport=`// ==UserScript==
 // @name         Arena 模型助手 · 会话模型跨域助手
 // @namespace    arena-model-companion.transport.local
-// @version      2026.09.26.3
+// @version      2026.09.26.6
 // @description  仅向固定的 meamoe.top 会话模型接口同步会话 ID 与模型名，供主脚本调用
 // @match        https://arena.ai/*
 // @run-at       document-start
@@ -28,7 +28,7 @@ new vm.Script(transport,{filename:'session-model-transport.user.js'});
 const dir=path.join(root,'userscript-build');fs.mkdirSync(dir,{recursive:true});
 fs.writeFileSync(path.join(dir,'user.candidate.js'),output);
 fs.writeFileSync(path.join(dir,'session-model-transport.candidate.js'),transport);
-fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({version:'2026.09.26.3',assets:manifest,modularSources:Object.fromEntries(['userscript/main.js','userscript/modules.cjs','userscript/assemble.cjs','userscript/patches/candidate.cjs','userscript/patches/probe.cjs'].map(p=>[p,hash(read(p))])),resources:Object.fromEntries(Object.entries(resources).map(([n,s])=>[n,hash(s)])),adapter:hash(read('tools/userscript-adapter.js')),sessionModels:hash(read('tools/userscript-session-models.js')),sessionModelTransport:hash(transportSource),accountCompat:hash(read('tools/userscript-account-compat.js')),sessionUsage:hash(read('tools/userscript-session-usage.js')),reasoningInspector:hash(read('tools/userscript-reasoning.js')),taskReviewHider:hash(read('tools/userscript-task-review-hider.js')),composerVisibility:hash(read('tools/userscript-composer-visibility.js')),composerAutoEsc:hash(read('tools/userscript-composer-auto-esc.js')),outputSha256:hash(output),bytes:Buffer.byteLength(output),transportSha256:hash(transport),transportBytes:Buffer.byteLength(transport)},null,2));
+fs.writeFileSync(path.join(dir,'manifest.json'),JSON.stringify({version:'2026.09.26.6',assets:manifest,modularSources:Object.fromEntries(['userscript/main.js','userscript/modules.cjs','userscript/assemble.cjs','userscript/patches/candidate.cjs','userscript/patches/probe.cjs'].map(p=>[p,hash(read(p))])),resources:Object.fromEntries(Object.entries(resources).map(([n,s])=>[n,hash(s)])),adapter:hash(read('tools/userscript-adapter.js')),sessionModels:hash(read('tools/userscript-session-models.js')),sessionModelTransport:hash(transportSource),accountCompat:hash(read('tools/userscript-account-compat.js')),sessionUsage:hash(read('tools/userscript-session-usage.js')),reasoningInspector:hash(read('tools/userscript-reasoning.js')),thinkingStop:hash(read('tools/userscript-thinking-stop.js')),taskReviewHider:hash(read('tools/userscript-task-review-hider.js')),composerVisibility:hash(read('tools/userscript-composer-visibility.js')),composerAutoEsc:hash(read('tools/userscript-composer-auto-esc.js')),outputSha256:hash(output),bytes:Buffer.byteLength(output),transportSha256:hash(transport),transportBytes:Buffer.byteLength(transport)},null,2));
 if(process.argv.includes('--write')){
  const dest=path.join(root,'user.js');const before=fs.readFileSync(dest);const backup=path.join(root,'backups','user-'+new Date().toISOString().replace(/[:.]/g,'-')+'.js');fs.mkdirSync(path.dirname(backup),{recursive:true});fs.writeFileSync(backup,before,{flag:'wx'});
  if(hash(fs.readFileSync(backup))!==hash(before))throw Error('Backup mismatch');

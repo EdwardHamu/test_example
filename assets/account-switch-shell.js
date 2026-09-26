@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 账号切换（Arena Native Suite 配套）
 // @namespace    local.amp.native.accounts
-// @version      2.0.0
+// @version      2.0.4
 // @description  服务端账号保险库：账号、Cookie、可选密码、额度和快捷键远程存储，按需读取与安全切换
 // @match        https://arena.ai/*
 // @include      https://arena.ai/*
@@ -23,7 +23,7 @@
 
 (function arenaAccountSwitch() {
   'use strict';
-  const VERSION = '2.0.0';
+  const VERSION = '2.0.4';
   try { document.documentElement.dataset.ampSwitchVer = VERSION; } catch {}
   const ORIGIN = 'https://' + location.host;
   const AUTH_RE = /^arena-auth-prod-v1(\.\d+)?$/;
@@ -54,10 +54,13 @@
     SESSION_CONFLICT: '当前浏览器与服务端会话不同，未自动覆盖；如确认使用本机会话，请点“保存当前会话”',
     NETWORK_ERROR: '无法连接账号服务器（网络错误）', TIMEOUT: '账号服务器请求超时', CONNECTION_CHANGED: '连接配置已改变，操作已取消',
     UNSUPPORTED_MANAGER: '安全连接需要 Tampermonkey 5.4 或以上版本（支持禁止请求重定向）',
-    INVALID_COOKIE_BUNDLE: '凭据格式或 Cookie 域不安全，未写入浏览器', REDIRECT_BLOCKED: '服务器发生重定向，已阻止发送凭据',
+    INVALID_COOKIE_BUNDLE: '服务端拒绝了凭据数据', CREDENTIAL_IDENTITY_MISMATCH: '凭据对应的账号身份无法确认或与目标账号不一致', REDIRECT_BLOCKED: '服务器发生重定向，已阻止发送凭据',
     ACCOUNT_NOT_FOUND: '账号已在服务端删除；不会自动重新创建', HTTP_ERROR: '服务器请求失败', IDEMPOTENCY_CAPACITY: '服务端幂等记录已达限额，请稍后重试',
+    MIGRATION_VERIFY_FAILED: '服务端读回数据与待迁移内容不一致，旧库已保留',
+    MIGRATION_CONFLICT: '服务端已有不同数据，未覆盖；请核对，旧库已保留',
+    INVALID_SERVER_RESPONSE: '服务端响应不完整，未将本次操作视为成功',
     ROLLBACK_FAILED: '恢复原 Cookie 失败，请暂停操作并检查 Cookie 权限；可能需要在 Arena 重新登录'
-  }[e?.code] || (e?.status ? '账号服务器操作失败（HTTP ' + e.status + '）' : '操作失败，请检查连接与 Cookie 权限'));
+  }[e?.code] || (e?.status ? '账号服务器操作失败（HTTP ' + e.status + (typeof e.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(e.code)?'，'+e.code:'') + '）' : '操作失败，请检查连接与 Cookie 权限'));
   function gmTransport(request) {
     return new Promise((resolve, reject) => {
       const info = typeof GM_info !== 'undefined' ? GM_info : {};
@@ -135,14 +138,14 @@
     reflect(); return a;
   }
   async function syncCurrent0({ allowCreate = false, force = false } = {}) {
-    const auth = authOf(await listCookies()), session = decodeSession(auth);
+    const cookies = await listCookies(), auth = authOf(cookies), session = decodeSession(auth);
     currentId = !session.anonymous && session.email ? emailKey(session) : null;
     if (!vault.ready() || !auth.length || !currentId) return null;
     if (cookieMode !== 'gm') return find(currentId);
     const profile = { id: session.id, email: session.email, name: session.name, avatar: session.avatar };
     let a = await resolveRecord(profile, allowCreate); if (!a) return null;
     if(a.status==='disabled'&&!force)return toUI(a);
-    const localHash = await vault.digest(auth), previous = syncedCredentials.get(a.id);
+    const localHash = await vault.digest(cookies), previous = syncedCredentials.get(a.id);
     if (previous?.hash !== localHash || previous.revision !== a.credentialRevision || force) {
       await vault.withLease(a, async lease => {
         a = await vault.get(a.id); let remoteHash = null;
@@ -150,7 +153,7 @@
         if (remoteHash !== localHash) {
           // First observation on this page cannot tell a legitimate rotation from another device's session.
           if (!force && (!previous || previous.revision !== a.credentialRevision)) throw Object.assign(new Error('SESSION_CONFLICT'), { code: 'SESSION_CONFLICT' });
-          lease.guard(); const result = await lease.write(a.credentialRevision, vault.bundle(auth, session.exp));
+          lease.guard(); const result = await lease.write(a.credentialRevision, vault.bundle(cookies, session.exp));
           syncedCredentials.set(a.id, { hash: localHash, revision: result.credentialRevision });
         } else syncedCredentials.set(a.id, { hash: localHash, revision: a.credentialRevision });
       });
@@ -282,38 +285,176 @@
     }
     btn(card,'关闭',()=>{root.textContent='';root.remove();});root.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Escape'){root.textContent='';root.remove();}});
   }
-  // Migration is explicit, per-account, non-destructive until a verified full pass succeeds.
+  // Migration fills missing resources, never replaces existing secrets, and can resume after a partial failure.
+  function migrationJSON(value) {
+    const stable = v => Array.isArray(v) ? v.map(stable) : v && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, stable(v[k])])) : v;
+    return JSON.stringify(stable(value));
+  }
+  function migrationBundleKey(bundle) {
+    if (!bundle || !Array.isArray(bundle.cookies)) throw Object.assign(new Error('MIGRATION_VERIFY_FAILED'), { code: 'MIGRATION_VERIFY_FAILED' });
+    // Unlike the session-change digest, verify attributes/expiry too, not just Cookie names and values.
+    const cookies = bundle.cookies.map(c => migrationJSON(c)).sort();
+    return migrationJSON({ schemaVersion: bundle.schemaVersion, sessionExpiresAt: bundle.sessionExpiresAt ?? null, cookies });
+  }
+  function legacySource(value) {
+    if (value == null) return { rows: [], issues: [] };
+    try { if (typeof value === 'string') value = JSON.parse(value); } catch { return { rows: [], issues: ['旧库不是有效 JSON，未清理原数据'] }; }
+    if (value && !Array.isArray(value) && Array.isArray(value.accounts)) value = value.accounts;
+    if (!Array.isArray(value)) return { rows: [], issues: ['旧库格式无法识别，未清理原数据'] };
+    const rows = value.filter(a => a && typeof a === 'object' && /^[^\s@]+@[^\s@]+$/.test(emailKey(a)));
+    return { rows, issues: rows.length === value.length ? [] : ['有 '+(value.length-rows.length)+' 条账号记录无法识别，原数据将保留'] };
+  }
   async function migrateLegacy() {
+    if (repoBusy || suppressSync || switchingNow) { toast('当前账号操作尚未结束，请稍后再迁移'); return; }
     if (!await ensureConnected()) return;
-    const snapshots = LEGACY_KEYS.map(k=>GM_getValue(k,null));
-    const legacy = sanitizeLegacy(snapshots.flatMap(v=>Array.isArray(v)?v:[]));
-    if (!legacy.length) { toast('没有发现旧版本地账号库'); return; }
-    if (!confirm('将 '+legacy.length+' 个旧账号上传到当前服务端？同邮箱已有账号一律跳过，不覆盖。全部验证成功后才提供清理选项。')) return;
-    const includePasswords = confirm('旧库可能含明文密码。是否明确同意将这些密码加密保存到服务端？取消则不上传密码，且保留旧库。');
-    repoBusy=true;suppressSync=true;let complete=true, imported=0, skipped=0;const initialKey=GM_getValue(CONFIG_KEY,null)?.key;
+    if (repoBusy || suppressSync || switchingNow) { toast('当前账号操作尚未结束，请稍后再迁移'); return; }
+    const keys = [...LEGACY_KEYS, 'hotkeys.v1', 'rememberPw'];
+    const snapshots = keys.map(k => GM_getValue(k, null)), fingerprints = snapshots.map(v => JSON.stringify(v));
+    const sources = snapshots.slice(0, LEGACY_KEYS.length).map(legacySource);
+    const legacy = sanitizeLegacy(sources.flatMap(s => s.rows));
+    if (!legacy.length) { toast(sources.some(s => s.issues.length) ? '旧库格式无法识别，原数据未删除' : '没有发现旧版本地账号库'); return; }
+    const checkpoint = vault.connectionGuard(), initialConfig = JSON.stringify(GM_getValue(CONFIG_KEY, null));
+    const failure = code => Object.assign(new Error(code), { code });
+    const guard = () => { checkpoint(); if (JSON.stringify(GM_getValue(CONFIG_KEY, null)) !== initialConfig) throw failure('CONNECTION_CHANGED'); };
+    const checked = async fn => { guard(); const result = await fn(); guard(); return result; };
+    const unchanged = () => keys.every((k, i) => JSON.stringify(GM_getValue(k, null)) === fingerprints[i]);
+    if (!confirm('将 '+legacy.length+' 个旧账号及已有密码迁移到当前服务端？密码会加密保存，并按需读回核验。同邮箱账号会补齐缺失的 Cookie / 密码；已有内容只核对、不覆盖。取消则不上传。失败可直接重试，无需删除服务端账号。')) return;
+    // Preserve the latest default: the single explicit confirmation above includes saved passwords.
+    const report = { total: legacy.length, created: 0, resumed: 0, rows: [], issues: sources.flatMap(s => s.issues), cleaned: false, aborted: false };
+    for (const a of legacy) for (const issue of a._legacyIssues) report.issues.push(a.email+'：'+issue);
+    const receipts = new Map(), hk = snapshots[LEGACY_KEYS.length];
+    const recordError = (row, field, e) => {
+      const code = /^[A-Z0-9_]{1,80}$/.test(e?.code || '') ? e.code : 'MIGRATION_STEP_FAILED';
+      row[field] = code === 'MIGRATION_CONFLICT' ? 'conflict' : 'failed';
+      row.errors.push({ field, code, message: errorText(e) });
+    };
+    const step = async (row, field, fn) => {
+      try { await checked(fn); return true; }
+      catch (e) { if (e?.status === 401) throw e; guard(); recordError(row, field, e); return false; }
+    };
+    const verified = () => receipts.size === legacy.length && [...receipts].every(([id, r]) => {
+      const a = vault.accounts().find(a => a.id === id);
+      return a && (r.credentials === undefined || a.hasCredentials && a.credentialRevision === r.credentials)
+        && (r.password === undefined || a.hasPassword && a.passwordRevision === r.password);
+    });
+    repoBusy = true; suppressSync = true;
     try {
-      await refreshAccounts();
-      const hk=GM_getValue('hotkeys.v1',null);
-      for(const old of legacy){
-        if(vault.accounts().some(a=>emailKey(a)===emailKey(old))){skipped++;complete=false;continue;}
-        const a=await vault.create({...profileRecord(old),status:old.invalid?'reauth_required':'unknown'});
-        if(old.cookies?.length)await vault.withLease(a,async lease=>{await lease.write(0,vault.bundle(old.cookies,old.exp));const check=await lease.read();if(await vault.digest(check.bundle.cookies)!==await vault.digest(old.cookies))throw Object.assign(new Error('MIGRATION_VERIFY_FAILED'),{code:'MIGRATION_VERIFY_FAILED'});});
-        if(old.pw){if(includePasswords){await vault.password(vault.find(a.id),String(old.pw));if(await vault.readPassword(vault.find(a.id))!==String(old.pw))throw Object.assign(new Error('MIGRATION_VERIFY_FAILED'),{code:'MIGRATION_VERIFY_FAILED'});}else complete=false;}
-        reflect();const migratedQuota=legacyQuota(old);await saveQuota(toUI(vault.find(a.id)),migratedQuota);
-        const mirror=normalizedMirror(migratedQuota);if(Object.keys(mirror).length)await vault.putMirror(vault.find(a.id),mirror);
-        const combo=hk?.accounts?.[emailKey(old)];if(typeof combo==='string'&&combo.length<=53)await vault.patch(vault.find(a.id),{tags:['amp-hotkey:'+combo]});
-        imported++;
-      }
-      if(complete&&typeof hk?.panel==='string'&&hk.panel!==vault.hotkeys().panel&&confirm('将旧面板快捷键同步到服务端？')){await vault.saveHotkeys({...vault.hotkeys(),panel:hk.panel});}
-      await refreshAccounts();
-      if(complete && imported===legacy.length && GM_getValue(CONFIG_KEY,null)?.key===initialKey
-        && LEGACY_KEYS.every((k,i)=>JSON.stringify(GM_getValue(k,null))===JSON.stringify(snapshots[i]))) {
-        if(confirm('已上传并校验 '+imported+' 个账号。清理本地 accounts.v1/v2 及旧账号快捷键？请先禁用仍在运行的旧版本脚本；历史对话缓存不在迁移范围内。')) {
-          for(const k of LEGACY_KEYS)GM_deleteValue(k);GM_deleteValue('hotkeys.v1');GM_deleteValue('rememberPw');toast('迁移完成，本地旧账号库已清理');
+      // Let an already-started automatic sync finish; later syncs are suppressed until migration ends.
+      if (syncing) await syncing.catch(() => {});
+      await checked(refreshAccounts);
+      for (const old of legacy) {
+        guard();
+        const row = { email: old.email, account: 'pending', cookies: 'absent', password: 'absent', extras: 'pending', errors: [] };
+        report.rows.push(row); let a;
+        if (!await step(row, 'account', async () => {
+          a = vault.accounts().find(a => emailKey(a) === old.email);
+          if (!a) {
+            try { a = await checked(() => vault.create({ ...profileRecord(old), status: old.invalid ? 'reauth_required' : 'unknown' })); report.created++; row.account = 'created'; }
+            catch (e) {
+              if (e?.code !== 'EMAIL_EXISTS') throw e;
+              await checked(refreshAccounts); a = vault.accounts().find(a => emailKey(a) === old.email);
+              if (!a) throw e;
+            }
+          }
+          if (row.account !== 'created') { a = await checked(() => vault.get(a.id)); report.resumed++; row.account = 'existing'; }
+          receipts.set(a.id, {});
+        })) continue;
+        if (old.cookies?.length) await step(row, 'cookies', async () => {
+          const expected = vault.bundle(old.cookies, old.exp);
+          await checked(() => vault.withLease(a, async lease => {
+            a = await checked(() => vault.get(a.id));
+            if (typeof a.hasCredentials !== 'boolean') throw failure('INVALID_SERVER_RESPONSE');
+            const existed = a.hasCredentials;
+            // Read the CURRENT resource revision under the lease, not a hard-coded r0.
+            if (!existed) await checked(() => lease.write(a.credentialRevision, expected));
+            const read = await checked(() => lease.read());
+            if (migrationBundleKey(read.bundle) !== migrationBundleKey(expected)) throw failure(existed ? 'MIGRATION_CONFLICT' : 'MIGRATION_VERIFY_FAILED');
+            if (read.credentialRevision !== vault.find(a.id).credentialRevision) throw failure('MIGRATION_VERIFY_FAILED');
+            receipts.get(a.id).credentials = read.credentialRevision;
+            row.cookies = existed ? 'verified' : 'saved';
+          }));
+        });
+        // Password failures and Cookie failures are independent; neither blocks later accounts.
+        if (old.pw) {
+          await step(row, 'password', async () => {
+            a = await checked(() => vault.get(a.id));
+            if (typeof a.hasPassword !== 'boolean') throw failure('INVALID_SERVER_RESPONSE');
+            const existed = a.hasPassword;
+            if (!existed) a = await checked(() => vault.password(a, old.pw));
+            const value = await checked(() => vault.readPassword(a));
+            if (value !== old.pw) throw failure(existed ? 'MIGRATION_CONFLICT' : 'MIGRATION_VERIFY_FAILED');
+            receipts.get(a.id).password = a.passwordRevision;
+            row.password = existed ? 'verified' : 'saved';
+          });
         }
-      } else toast('已导入 '+imported+' 个，跳过 '+skipped+' 个；旧库仍保留，请核对后再处理。');
-    } catch(e){toast('迁移中断，旧库未删除。'+errorText(e));}
-    finally{repoBusy=false;suppressSync=false;for(const a of legacy){delete a.cookies;delete a.pw;delete a.mirror;}}
+        await step(row, 'extras', async () => {
+          a = await checked(() => vault.get(a.id));
+          const q = legacyQuota(old); await checked(() => saveQuota(toUI(a), q));
+          const mirror = normalizedMirror(q);
+          if (Object.keys(mirror).length) {
+            a = vault.find(a.id);
+            const existing = a.hasMirror ? await checked(() => vault.readMirror(a)) : {};
+            // Fill missing mirror keys without replacing another device's snapshot.
+            const merged = { ...mirror, ...existing };
+            if (migrationJSON(merged) !== migrationJSON(existing)) await checked(() => vault.putMirror(a, merged));
+            const read = await checked(() => vault.readMirror(vault.find(a.id)));
+            if (Object.keys(mirror).some(k => migrationJSON(read[k]) !== migrationJSON(mirror[k]))) throw failure('MIGRATION_CONFLICT');
+          }
+          const combo = hk?.accounts?.[old.email];
+          if (combo !== undefined && combo !== '') {
+            if (typeof combo !== 'string' || combo.length > 53) throw failure('HOTKEY_TOO_LONG');
+            a = await checked(() => vault.get(a.id));
+            const existing = (a.tags || []).find(t => t.startsWith('amp-hotkey:'));
+            if (existing && existing !== 'amp-hotkey:'+combo) throw failure('MIGRATION_CONFLICT');
+            if (!existing) await checked(() => vault.patch(a, { tags: [...(a.tags || []), 'amp-hotkey:'+combo] }));
+          }
+          row.extras = 'verified';
+        });
+      }
+      if (hk && (typeof hk !== 'object' || Array.isArray(hk) || hk.accounts && (typeof hk.accounts !== 'object' || Array.isArray(hk.accounts)))) report.issues.push('旧快捷键格式无法识别，旧库将保留');
+      if (hk?.accounts && Object.keys(hk.accounts).some(k => !legacy.some(a => a.email === k))) report.issues.push('部分旧快捷键没有对应迁移账号，旧库将保留');
+      const complete = report.rows.length === legacy.length && report.rows.every(r => !r.errors.length);
+      if (complete && !report.issues.length && hk?.panel !== undefined && hk.panel !== vault.hotkeys().panel) {
+        if (typeof hk.panel !== 'string') report.issues.push('旧面板快捷键格式无法识别，旧库将保留');
+        else if (confirm('将旧面板快捷键同步到服务端？取消将保留本地旧快捷键和账号库。')) await checked(() => vault.saveHotkeys({ ...vault.hotkeys(), panel: hk.panel }));
+        else report.issues.push('未迁移旧面板快捷键，旧库将保留');
+      }
+      await checked(refreshAccounts);
+      if (!unchanged()) report.issues.push('迁移期间本地旧库或快捷键发生变化，未清理');
+      if (complete && !verified()) report.issues.push('服务端凭据在核验后发生变化，未清理');
+      if (complete && !report.issues.length && confirm('已逐项上传或核验 '+legacy.length+' 个账号。是否清理本地 accounts.v1/v2、旧快捷键和记住密码设置？取消可保留备份；请先停用旧版脚本并刷新旧页面。')) {
+        // Recheck AFTER the confirmation as well: another tab/device may have changed data while it was open.
+        await checked(refreshAccounts);
+        if (!unchanged() || !verified()) report.issues.push('确认期间数据发生变化，未清理旧库');
+        else { guard(); for (const k of keys) GM_deleteValue(k); report.cleaned = true; }
+      }
+    } catch (e) { report.aborted = true; report.issues.push('迁移中断：'+errorText(e)); }
+    finally {
+      repoBusy = false; suppressSync = false;
+      for (const a of legacy) { delete a.cookies; delete a.pw; delete a.password; delete a.mirror; }
+    }
+    // Report only metadata/status/error codes. Never return or render a Cookie/password/bundle.
+    showMigrationReport(report); return report;
+  }
+  function showMigrationReport(report) {
+    const count = field => report.rows.filter(r => ['saved', 'verified'].includes(r[field])).length;
+    const summary = '新建 '+report.created+' 个，续传/核对 '+report.resumed+' 个；Cookie 已核验 '+count('cookies')+' 个，密码已核验 '+count('password')+' 个。';
+    const labels = { pending: '未执行', absent: '旧库无此数据', saved: '已补齐并读回核验', verified: '已有相同内容，已核验', conflict: '已有不同内容，未覆盖', failed: '失败，原数据保留', created: '已新建', existing: '已有账号' };
+    const details = [summary, report.cleaned ? '本地旧库已清理。' : '本地旧库仍保留；失败项可直接再次迁移，不需要删除服务端账号。',
+      '保存成功不代表旧 Cookie 仍能登录；失效会话仍需重新登录。', ...report.issues,
+      ...report.rows.map(r => '\n'+r.email+' · '+labels[r.account]+'\nCookie：'+labels[r.cookies]+'；密码：'+labels[r.password]
+        +r.errors.map(e => '\n'+({account:'账号',cookies:'Cookie',password:'密码',extras:'额度/快捷键'}[e.field] || e.field)+'：'+e.message+' ['+e.code+']').join(''))].join('\n');
+    toast(summary+(report.cleaned ? '旧库已清理。' : '旧库已保留。'));
+    document.querySelector('[data-amp-migration-report]')?.remove();
+    const root = el('div', 'position:fixed;inset:0;z-index:2147483647;background:#0008;display:flex;align-items:center;justify-content:center;padding:24px;', null, document.body);
+    root.dataset.ampMigrationReport = '1'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-label', '账号迁移结果'); root.setAttribute('aria-modal', 'true');
+    const card = el('div', 'background:#fff;color:#242424;border-radius:14px;padding:20px;max-width:760px;width:100%;max-height:85vh;overflow:auto;font:14px/1.6 system-ui,sans-serif;', null, root);
+    el('h3', 'margin:0 0 12px;', '账号迁移结果', card);
+    el('pre', 'white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;', details, card);
+    const close = el('button', 'padding:8px 20px;cursor:pointer;', '关闭', card); close.type = 'button';
+    const dismiss = () => { root.textContent = ''; root.remove(); }; close.onclick = dismiss;
+    root.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') dismiss(); }); close.focus();
   }
   function legacyQuota(old) {
     const q={...(old.quota||{})}, read=k=>{try{const v=old.mirror?.[k];return typeof v==='string'?JSON.parse(v):v;}catch{return null;}};
@@ -324,7 +465,28 @@
     return q;
   }
   function sanitizeLegacy(list) {
-    const by=new Map();for(const a of list){const key=emailKey(a);if(!key||!/@/.test(key))continue;const previous=by.get(key);if(!previous||(a.savedAt||0)>(previous.savedAt||0))by.set(key,{...a,email:key});}return [...by.values()];
+    const by = new Map();
+    for (const original of list) {
+      const email = emailKey(original); if (!/^[^\s@]+@[^\s@]+$/.test(email)) continue;
+      const a = { ...original, email, _legacyIssues: [] };
+      if (typeof a.cookies === 'string') { try { a.cookies = JSON.parse(a.cookies); } catch { a._legacyIssues.push('Cookie 格式无法识别，旧库将保留'); } }
+      if (a.cookies != null && !Array.isArray(a.cookies)) a._legacyIssues.push('Cookie 不是数组，旧库将保留');
+      if (a.pw != null && typeof a.pw !== 'string' || a.password != null && typeof a.password !== 'string') a._legacyIssues.push('密码格式无法识别，旧库将保留');
+      if (a.pw && a.password && a.pw !== a.password) a._legacyIssues.push('旧密码字段存在歧义，旧库将保留');
+      a.pw = typeof a.pw === 'string' && a.pw ? a.pw : typeof a.password === 'string' ? a.password : '';
+      if (!by.has(email)) by.set(email, []); by.get(email).push(a);
+    }
+    return [...by.values()].map(group => {
+      // Stable sorting keeps v2 first on equal timestamps. Select whole Cookie snapshots; never splice sessions.
+      const time = a => Number.isFinite(Number(a.savedAt)) ? Number(a.savedAt) : 0;
+      group.sort((a, b) => time(b) - time(a));
+      const merged = Object.assign({}, ...group.slice().reverse()), credentials = group.find(a => Array.isArray(a.cookies) && a.cookies.length);
+      merged.cookies = credentials ? JSON.parse(JSON.stringify(credentials.cookies)) : [];
+      merged.exp = credentials?.exp;
+      merged.pw = group.find(a => a.pw)?.pw || '';
+      merged._legacyIssues = group.flatMap(a => a._legacyIssues);
+      return merged;
+    });
   }
   async function openHotkeys() {
     if(!await ensureConnected())return;await refreshAccounts();
@@ -414,7 +576,7 @@
         if(error||!Array.isArray(cookies)){cookieMode='gm-error';lastError='Cookie API 读取失败';resolve(docCookies());}
         else{cookieMode='gm';resolve(cookies);}};
       const timer=setTimeout(()=>finish(null,true),7000);
-      if(gmCookie?.list){try{gmCookie.list({url:ORIGIN+'/'},finish);}catch{finish(null,true);}}
+      if(gmCookie?.list){try{gmCookie.list({domain:location.hostname||location.host},finish);}catch{finish(null,true);}}
       else{clearTimeout(timer);finished=true;cookieMode='document';resolve(docCookies());}
     });
   }
@@ -435,7 +597,7 @@
   }
   function delCookie(c) { return cookieCall('delete',{url:ORIGIN+(c.path||'/'),name:c.name}); }
   function setCookie(c) {
-    const d={url:ORIGIN+'/',name:c.name,value:c.value,path:'/',secure:true,httpOnly:!!c.httpOnly};
+    const d={url:ORIGIN+(c.path||'/'),name:c.name,value:c.value,path:c.path||'/',secure:c.secure!==false,httpOnly:!!c.httpOnly};
     if(!c.hostOnly&&c.domain)d.domain=c.domain;
     if(!c.session&&Number.isFinite(c.expirationDate))d.expirationDate=c.expirationDate;
     if(/^(lax|strict|no_restriction)$/i.test(c.sameSite||''))d.sameSite=c.sameSite.toLowerCase();
@@ -447,7 +609,7 @@
   function b64(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return decodeURIComponent(escape(atob(s))); }
   function decodeSession(auth) {
     try {
-      let v = auth.map(c => c.value).join('');
+      let v = authOf(auth).map(c => c.value).join('');
       try { v = decodeURIComponent(v); } catch {}
       if (v.startsWith('base64-')) v = b64(v.slice(7));
       let j = null; try { j = JSON.parse(v); } catch {}
@@ -546,10 +708,10 @@
   }
   async function replaceAuth(cookies) {
     if (!gmCookie?.list || !gmCookie?.set || !gmCookie?.delete || cookieMode !== 'gm') throw Object.assign(new Error('COOKIE_PERMISSION'), { code:'COOKIE_PERMISSION' });
-    for (const c of authOf(await listCookies())) await delCookie(c);
+    for (const c of await listCookies()) await delCookie(c);
     for (const c of cookies) { const error = await setCookie(c); if (error) throw Object.assign(new Error('COOKIE_WRITE_FAILED'), { code:'COOKIE_WRITE_FAILED' }); }
     const expected = cookies.filter(c => !Number.isFinite(c.expirationDate) || c.expirationDate > Date.now()/1000);
-    if (await vault.digest(authOf(await listCookies())) !== await vault.digest(expected)) throw Object.assign(new Error('COOKIE_WRITE_FAILED'), { code:'COOKIE_WRITE_FAILED' });
+    if (await vault.digest(await listCookies()) !== await vault.digest(expected)) throw Object.assign(new Error('COOKIE_WRITE_FAILED'), { code:'COOKIE_WRITE_FAILED' });
   }
   async function rollbackAuth(before) {
     try { await replaceAuth(before); } catch { throw Object.assign(new Error('ROLLBACK_FAILED'), { code:'ROLLBACK_FAILED' }); }
@@ -562,7 +724,7 @@
   async function switchTo0(target) {
     if (!await ensureConnected()) return false;
     await refreshAccounts();
-    const before=authOf(await listCookies());
+    const before=await listCookies();
     if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
     const curSession=decodeSession(before);currentId=!curSession.anonymous&&curSession.email?emailKey(curSession):null;
     let cur=find(currentId);
@@ -577,18 +739,18 @@
     if(remote.status==='disabled'){toast('该账号已在服务端禁用');return false;}
     if(!remote.hasCredentials){closeSwitcher();openLoginForm(cur,{email:target.email,note:'服务端尚未保存此账号的会话，请登录'});return false;}
     await vault.withLease(remote,async lease=>{
-      // All remote reads and validations happen BEFORE deleting any browser Cookie.
+      // Remote reads, revision and account identity checks happen BEFORE deleting browser Cookies.
       const secret=await lease.read();remote=await vault.get(remote.id);
       if(secret.credentialRevision!==remote.credentialRevision)throw Object.assign(new Error('REVISION_CONFLICT'),{code:'REVISION_CONFLICT',status:412});
       const identity=decodeSession(secret.bundle.cookies);
-      if(identity.anonymous || identity.email && emailKey(identity)!==emailKey(remote))throw Object.assign(new Error('INVALID_COOKIE_BUNDLE'),{code:'INVALID_COOKIE_BUNDLE'});
+      if(identity.anonymous || identity.email && emailKey(identity)!==emailKey(remote))throw Object.assign(new Error('CREDENTIAL_IDENTITY_MISMATCH'),{code:'CREDENTIAL_IDENTITY_MISMATCH'});
       const targetMirror=await vault.readMirror(remote);
       let changed=false;
       try {
         lease.guard();changed=true;await replaceAuth(secret.bundle.cookies);
         const verified=await verifySession({email:remote.email,id:remote.providerUserId});
         if(verified!==true){await rollbackAuth(before);changed=false;invalid=verified===false;if(!invalid)throw Object.assign(new Error('VERIFY_UNAVAILABLE'),{code:'VERIFY_UNAVAILABLE'});return;}
-        const fresh=authOf(await listCookies());lease.guard();
+        const fresh=await listCookies();lease.guard();
         const result=await lease.write(secret.credentialRevision,vault.bundle(fresh,decodeSession(fresh).exp));
         syncedCredentials.set(remote.id,{hash:await vault.digest(fresh),revision:result.credentialRevision});
         remote=await patchProfile(vault.find(remote.id),{email:remote.email},'ready');target=mergeRemoteMirror(toUI(remote),targetMirror);
@@ -630,7 +792,7 @@
     suppressSync=true;
     try{await withBrowserLock(async()=>{
       await listCookies();if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
-      const before=authOf(await listCookies());const carried=carryOut();
+      const before=await listCookies();const carried=carryOut();
       try{if(cur){await syncCurrent({locked:true,force:true});await mirrorOut(cur);}await replaceAuth([]);}
       catch(e){await rollbackAuth(before);throw e;}
       bypassLogin=true;restoreLogin();mirrorIn(null);markDirty();carryArm(carried);pending(true);location.href=ORIGIN+'/agent';
@@ -640,7 +802,7 @@
   async function signInEmail(em,pw,opt={}){
     if(!vault.ready())return{error:'请先连接服务端账号库'};
     const execute=async()=>{
-      await refreshAccounts();const before=authOf(await listCookies());
+      await refreshAccounts();const before=await listCookies();
       if(cookieMode!=='gm')throw Object.assign(new Error('COOKIE_PERMISSION'),{code:'COOKIE_PERMISSION'});
       let a=await resolveRecord({email:em},true);let result;
       await vault.withLease(a,async lease=>{
@@ -653,14 +815,14 @@
           if(!res.ok||!j?.success){throw Object.assign(new Error('ARENA_LOGIN_FAILED'),{code:'ARENA_LOGIN_FAILED',userMessage:res.status===429?'Arena 登录过于频繁，请稍后再试':j?.requiresVerification?'请先验证邮箱，或改用 Arena 官方登录':'Arena 登录失败，请检查邮箱密码或改用官方登录页'});}
           const verified=await verifySession({email:em,id:a.providerUserId});
           if(verified!==true)throw Object.assign(new Error('VERIFY_UNAVAILABLE'),{code:'VERIFY_UNAVAILABLE'});
-          const auth=authOf(await listCookies()),identity=decodeSession(auth);
-          if(!auth.length||identity.anonymous||identity.email&&emailKey(identity)!==emailKey({email:em}))throw Object.assign(new Error('INVALID_COOKIE_BUNDLE'),{code:'INVALID_COOKIE_BUNDLE'});
+          const cookies=await listCookies(),auth=authOf(cookies),identity=decodeSession(auth);
+          if(!auth.length||identity.anonymous||identity.email&&emailKey(identity)!==emailKey({email:em}))throw Object.assign(new Error('CREDENTIAL_IDENTITY_MISMATCH'),{code:'CREDENTIAL_IDENTITY_MISMATCH'});
           opt.stage?.('正在保存到服务端…');lease.guard();a=await vault.get(a.id);
-          const saved=await lease.write(a.credentialRevision,vault.bundle(auth,identity.exp));
-          syncedCredentials.set(a.id,{hash:await vault.digest(auth),revision:saved.credentialRevision});
+          const saved=await lease.write(a.credentialRevision,vault.bundle(cookies,identity.exp));
+          syncedCredentials.set(a.id,{hash:await vault.digest(cookies),revision:saved.credentialRevision});
           a=await patchProfile(vault.find(a.id),{email:em,id:identity.id,name:identity.name,avatar:identity.avatar},'ready');
           if(!opt.preservePassword){
-            if(opt.remember)await vault.password(a,pw);
+            if(opt.remember !== false)await vault.password(a,pw);
             else if(a.hasPassword)await vault.password(a,null);
           }
           reflect();result={rec:mergeRemoteMirror(toUI(vault.find(a.id)),oldMirror)};
@@ -737,8 +899,8 @@
     const eyeOff = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
     eye.innerHTML = eyeOn; eye.onclick = () => { const show = pwd.type === 'password'; pwd.type = show ? 'text' : 'password'; eye.innerHTML = show ? eyeOff : eyeOn; pwd.focus(); };
     const rl = el('label', null, null, card); rl.className = 'lf-rem';
-    const remember = el('input', null, null, rl); remember.type = 'checkbox'; remember.checked = false;
-    el('span', null, '将密码加密保存到服务端（可选，默认不保存）', rl);
+    const remember = el('input', null, null, rl); remember.type = 'checkbox'; remember.checked = true;
+    el('span', null, '将密码加密保存到服务端（默认保存，可取消）', rl);
 
     if (preset.email) email.value = preset.email;
 

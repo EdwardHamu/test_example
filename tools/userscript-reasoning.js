@@ -70,7 +70,7 @@
   });
   return {turn,checkedAt,calls,partial:!!detail?.limited||!!detail?.stopped||calls.some(c=>c.partial),multi:streams.length>1};
  }
- const owners=new Map();let container=null,last='',timer=null;
+ const owners=new Map();let container=null,mountedParent=null,last='',timer=null;
  function snapshot() {
   const empty=(state,note)=>({state,note,turn:null,calls:[]});
   try {
@@ -85,21 +85,31 @@
    if(!trace||trace.url!==url||trace.runId!==run.runId||!Number.isSafeInteger(trace.generation)||trace.generation!==p.bus.generation)return empty('pending','等待本轮 Span；没有显式字段时显示未知，不根据回答猜测。');
    const configs=(p.bus.evidence||[]).filter(e=>e?.source==='reasoning.config'&&!e.stale&&e.config?.source==='request'&&e.pageUrl===url&&e.generation===trace.generation).map(e=>e.config);
    const value=analyze(trace.detail,configs);
+   value.latestCall=trace.summary?.latestCall||null;
    if(!value.turn||value.turn<=(run.minTurn||0)||value.turn<(run.lastSeenTurn||0))return empty('pending','已开始新一轮，旧档位不沿用；等待当前轮次。');
    return {state:'ready',note:value.multi?'本轮有多次模型调用，逐条展示；不把轮次级记录归给某一次调用。':'仅表示接口提供的配置证据，不证明模型内部的实际计算量。',...value};
   } catch { return empty('error','思考等级暂不可用；未输出原始响应或账号凭据。'); }
  }
+ function uploadModel(){
+  const value=snapshot();if(value.state!=='ready'||value.partial)return null;
+  const selected=value.multi?value.calls.find(c=>c.spanId===value.latestCall?.spanId):value.calls[0];
+  if(!selected||selected.partial||!selected.internalModel)return null;
+  return {sessionId:location.pathname.split('/')[2]?.toLowerCase(),model:selected.internalModel,source:'reasoning-inspector',spanId:selected.spanId};
+ }
+ function mountHud(){const parent=typeof document!=='undefined'?document.getElementById?.('amp-hud')?.shadowRoot?.querySelector('[data-reasoning-inspector]'):null;if(parent)mount(parent);}
  function el(tag,text,parent){const node=document.createElement(tag);node.textContent=text;parent.append(node);return node;}
  function paint(value) {
   if(!container)return;
   const open=new Set(Array.from(container.querySelectorAll('details[open]')).map(d=>d.dataset.span));
   container.replaceChildren();el('h3','思考等级检查',container);el('p',value.note,container);
+  const sync=api.sessionModels?.status?.();if(sync)el('p','会话模型同步：'+(sync.lastError|| (sync.currentModel?'服务器记录：'+sync.currentModel:sync.transport?'已连接，等待内部名或服务器记录':'跨域助手未就绪')),container);
   if(value.state!=='ready')return;
   el('p','第 '+value.turn+' 轮 · '+value.calls.length+' 次模型调用'+(value.partial?' · 部分记录':''),container);
   for(const c of value.calls){
    const card=el('div','',container);card.style.cssText='border:1px solid #52617a;border-radius:7px;padding:9px;margin:8px 0';
-   const titleTier=c.effort.status==='explicit'&&LEVELS.includes(c.effort.value)?c.effort.value:c.effort.status==='conflict'?'冲突':c.effort.status==='unsupported'?'不支持':'未知';
+   const titleTier=value.latestCall?.spanId===c.spanId&&value.latestCall.partial?'未知':c.effort.status==='explicit'&&LEVELS.includes(c.effort.value)?c.effort.value:c.effort.status==='conflict'?'冲突':c.effort.status==='unsupported'?'不支持':'未知';
    el('strong',(c.requestModel||c.internalModel||'型号未提供')+' · '+titleTier,card);
+   if(value.latestCall?.spanId===c.spanId)el('p','最新调用 · '+(value.latestCall.order==='start-time'?'按开始时间':'按 Trace 顺序')+(c.partial?' · 尚未完成':''),card);
    const e=c.effort,level=e.value||({conflict:'冲突：'+e.levels.join(' / '),unsupported:'不支持的字段值'}[e.status])||'未知（没有显式配置）';
    el('p','显式思考等级：'+level,card);
    if(c.partial)el('p','当前调用记录不完整，字段可能继续更新。',card);
@@ -114,11 +124,13 @@
    if(!e.evidence.length&&!c.reasoning.evidence.length)el('p','未取得配置或推理用量字段。',d);
   }
  }
- function refresh(){const value=snapshot(),stamp=JSON.stringify(value);if(stamp!==last){paint(value);last=stamp;}return value;}
+ function refresh(){mountHud();const value=snapshot(),stamp=JSON.stringify([value,api.sessionModels?.status?.()]);if(stamp!==last){paint(value);last=stamp;}return value;}
  function mount(parent){
-  if(container?.isConnected)return;
-  container=el('section','',parent);container.setAttribute('aria-label','思考等级检查');last='';refresh();
+  if(!parent)return;
+  if(container){if(parent!==mountedParent){parent.append(container);mountedParent=parent;}return;}
+  mountedParent=parent;container=el('section','',parent);container.setAttribute('aria-label','思考等级检查');last='';refresh();
   if(timer===null)timer=setInterval(refresh,1000);
  }
- api.reasoningInspector={snapshot,refresh,mount,analyze,effort,hint,reported};
+ api.reasoningInspector={snapshot,refresh,mount,mountHud,uploadModel,analyze,effort,hint,reported};
+ if(typeof document!=='undefined'){if(timer===null)timer=setInterval(refresh,1000);mountHud();}
 })

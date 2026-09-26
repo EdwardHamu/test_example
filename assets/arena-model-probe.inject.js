@@ -165,6 +165,31 @@ function internalTierFromModels(internalModel, requestModel) {
  const match=/-(none|minimal|low|medium|high|xhigh|max)$/i.exec(internal);
  return match?match[1].toLowerCase():null;
 }
+function callConfigs(stream) {
+ const configs=[];
+ for(const e of Array.isArray(stream.reasoning)?stream.reasoning.slice(0,60):[]){
+  if(e?.kind==='effort')configs.push({kind:'effort',level:EFFORT_LEVELS.includes(e.level)?e.level:null,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
+  if(e?.kind==='budget'&&Number.isSafeInteger(e.value)&&e.value>=-1)configs.push({kind:'budget',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
+  if(e?.kind==='mode'&&['enabled','disabled','adaptive'].includes(e.value))configs.push({kind:'mode',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
+ }
+ return configs;
+}
+// Preserve nanosecond precision. A tied or missing order must not pick an arbitrary call.
+function latestCallReasoning(streams, detail) {
+ if(!streams.length || detail?.limited || detail?.stopped)return null;
+ let selected, order='single-call';
+ if(streams.length===1)selected=streams[0];
+ else if(streams.every(s=>typeof s.startTimeNs==='string'&&/^[0-9]{16,22}$/.test(s.startTimeNs))) {
+   const sorted=[...streams].sort((a,b)=>BigInt(a.startTimeNs)<BigInt(b.startTimeNs)?1:BigInt(a.startTimeNs)>BigInt(b.startTimeNs)?-1:0);
+   if(BigInt(sorted[0].startTimeNs)===BigInt(sorted[1].startTimeNs))return null;
+   selected=sorted[0];order='start-time';
+ } else if(streams.every(s=>Number.isSafeInteger(s.traceOrder)&&s.traceOrder>=0)&&new Set(streams.map(s=>s.traceOrder)).size===streams.length) {
+   selected=streams.reduce((a,b)=>a.traceOrder>b.traceOrder?a:b);order='trace-order';
+ } else return null;
+ const configs=selected.partial===false?callConfigs(selected):[];
+ return {spanId:selected.spanId,requestModel:label(selected.values?.apiModelName||selected.values?.requestModel||selected.values?.apiModelId),
+   partial:selected.partial!==false,order,configs,effort:summarizeReasoning(configs.map(config=>({source:'reasoning.config',config})))};
+}
 function latestTraceSummary(detail) {
  const spans=[],seen=new Set();
  for(const s of Array.isArray(detail?.spans)?detail.spans.slice(0,24):[]){if(!/^[a-f0-9]{16,32}$/.test(s?.spanId||'')||seen.has(s.spanId)||!['stream','usage','cost'].includes(s.kind))continue;seen.add(s.spanId);spans.push(s);}
@@ -174,7 +199,8 @@ function latestTraceSummary(detail) {
  const messageIds=new Set([...usageRows,...costRows].map(s=>s.values?.messageId).filter(Boolean));
  const calls=streams.map(s=>({spanId:s.spanId,requestModel:label(s.values?.apiModelName||s.values?.requestModel||s.values?.apiModelId),partial:s.partial!==false}));
  const ambiguous=streams.length>1||usageRows.length>1||costRows.length>1||messageIds.size>1;
- if(ambiguous||turn===null||streams.length!==1||streams[0].partial!==false)return {calls,checkedAt:label(detail?.checkedAt),coverage:ambiguous?'ambiguous':'partial',turn,usage:null,observation:observedReasoning(),configs:[],internalModel:null,internalTier:null,spanIds:[]};
+ const latestCall=turn===null?null:latestCallReasoning(streams,detail);
+ if(ambiguous||turn===null||streams.length!==1||streams[0].partial!==false)return {calls,latestCall,checkedAt:label(detail?.checkedAt),coverage:ambiguous?'ambiguous':'partial',turn,usage:null,observation:observedReasoning(),configs:[],internalModel:null,internalTier:null,spanIds:[]};
  const stream=streams[0],v=stream.values||{},usageSpans=current.filter(s=>s.kind==='usage'&&s.partial===false),costSpans=current.filter(s=>s.kind==='cost'&&s.partial===false);
  const one=(list,key)=>{const vals=[...new Set(list.map(s=>s.values?.[key]).filter(v=>v!==undefined&&v!==null))];return vals.length===1?vals[0]:null;};
  const observation=observedReasoning(v,stream.providerMeta||{});
@@ -193,13 +219,8 @@ function latestTraceSummary(detail) {
  const hintMatch=internalModel&&/^(.*)-(none|minimal|low|medium|high|xhigh|max)-agent$/i.exec(internalModel);
  const normalize=s=>(s||'').toLowerCase().replace(/[._]/g,'-');
  const internalNameHint=hintMatch&&normalize(hintMatch[1])===normalize(requestModel)?hintMatch[2].toLowerCase():null;
- const configs=[];
- for(const e of Array.isArray(stream.reasoning)?stream.reasoning.slice(0,60):[]){
-  if(e?.kind==='effort')configs.push({kind:'effort',level:EFFORT_LEVELS.includes(e.level)?e.level:null,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
-  if(e?.kind==='budget'&&Number.isSafeInteger(e.value)&&e.value>=-1)configs.push({kind:'budget',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
-  if(e?.kind==='mode'&&['enabled','disabled','adaptive'].includes(e.value))configs.push({kind:'mode',value:e.value,source:'run.span',path:__req("reasoning").cleanReasoningPath(e.path)});
- }
- return {calls,coverage:detail?.limited||detail?.stopped||!usageSpans.length||!costSpans.length?'partial':'complete',turn,usage,observation,configs,internalModel,internalTier:tier,internalNameHint,requestModel,responseModel,modelProvider,protocolProvider,routeConflict,spanIds:current.map(s=>s.spanId),checkedAt:label(detail?.checkedAt)};
+ const configs=callConfigs(stream);
+ return {calls,latestCall,coverage:detail?.limited||detail?.stopped||!usageSpans.length||!costSpans.length?'partial':'complete',turn,usage,observation,configs,internalModel,internalTier:tier,internalNameHint,requestModel,responseModel,modelProvider,protocolProvider,routeConflict,spanIds:current.map(s=>s.spanId),checkedAt:label(detail?.checkedAt)};
 }
 function desktopFacts(run,observations,evidence,detail) {
  const u=run?.usage,x=observations?.[observations.length-1];
@@ -208,12 +229,13 @@ function desktopFacts(run,observations,evidence,detail) {
  let usage=numeric(u)?u:numeric(response)?response:u||response;
  if(detail?.usage)usage=detail.usage; // whole same-call record, never mix prior-run counters.
  const configs=detail?.configs||[];
- const effort=summarizeReasoning([...(evidence||[]),...configs.map(config=>({source:'reasoning.config',config}))]);
+ const multi=(detail?.calls?.length||0)>1;
+ const effort=multi?(detail.latestCall?.effort||summarizeReasoning([])):summarizeReasoning([...(evidence||[]),...configs.map(config=>({source:'reasoning.config',config}))]);
  const fallback=observedReasoning({reasoningTokens:usage?.reasoning});
  if(fallback.tokens!==null)fallback.source=usage?.source||'response';
  const coverage=detail?.coverage||'no-detail';
   const collectionStatus=['rate-limited','incomplete'].includes(run?.collectionStatus)?run.collectionStatus:coverage==='ambiguous'?'multi':detail?.routeConflict?'conflict':coverage==='complete'?(detail.internalTier?'collected':'unprovided'):coverage==='partial'?'incomplete':run?.fetchCount>=8?'incomplete':run?.collectionStatus||'pending';
-  return {collectionStatus,checkedAt:run?.checkedAt||detail?.checkedAt||null,usage,effort,observation:detail?.observation||fallback,internalModel:detail?.internalModel||null,internalTier:detail?.internalTier||null,internalNameHint:detail?.internalNameHint||null,requestModel:detail?.requestModel||null,responseModel:detail?.responseModel||null,modelProvider:detail?.modelProvider||null,protocolProvider:detail?.protocolProvider||null,routeConflict:detail?.routeConflict===true,coverage:detail?.coverage||'no-detail',traceDetail:detail?{calls:detail.calls||[],turn:detail.turn,spanIds:detail.spanIds,checkedAt:detail.checkedAt}:null};
+  return {latestCall:detail?.latestCall||null,collectionStatus,checkedAt:run?.checkedAt||detail?.checkedAt||null,usage,effort,observation:detail?.observation||fallback,internalModel:detail?.internalModel||null,internalTier:detail?.internalTier||null,internalNameHint:detail?.internalNameHint||null,requestModel:detail?.requestModel||null,responseModel:detail?.responseModel||null,modelProvider:detail?.modelProvider||null,protocolProvider:detail?.protocolProvider||null,routeConflict:detail?.routeConflict===true,coverage:detail?.coverage||'no-detail',traceDetail:detail?{calls:detail.calls||[],turn:detail.turn,spanIds:detail.spanIds,checkedAt:detail.checkedAt}:null};
 }
 
   exp.REASONING_SOURCES = REASONING_SOURCES;
@@ -301,8 +323,9 @@ const SETTING_HINTS = ['ai.settings.providerOptions', 'ai.prompt.providerOptions
 function selectDetailSpans(trace, runId, limits = DETAIL_LIMITS) {
   if (!Array.isArray(trace?.events)) throw new Error('trace 格式不符合预期');
   const turns = [];
-  let current = null;
+  let current = null, traceOrder = -1;
   for (const e of trace.events) {
+    traceOrder++;
     if (e?.runId !== runId || typeof e.message !== 'string') continue;
     const turnMatch = e.message.match(TURN);
     if (turnMatch) { current = {turn: Number(turnMatch[1]), spans: []}; turns.push(current); continue; }
@@ -310,7 +333,7 @@ function selectDetailSpans(trace, runId, limits = DETAIL_LIMITS) {
     if (!kind) continue;
     if (!spanId(e.spanId)) throw new Error('span ID 无效');
     if (!current) { current = {turn: null, spans: []}; turns.push(current); }
-    current.spans.push({spanId: e.spanId, kind, message: e.message, partial: e.isPartial !== false});
+    current.spans.push({spanId: e.spanId, kind, message: e.message, partial: e.isPartial !== false, traceOrder, startTimeNs:typeof e.startTime==='string'&&/^[0-9]{16,22}$/.test(e.startTime)?e.startTime:null});
   }
   const withSpans = turns.filter(t => t.spans.length);
   const kept = withSpans.slice(-limits.turns);
@@ -324,6 +347,8 @@ function parseDetailSpan(detail, event, runId) {
   for (const [name, [path, clean]] of Object.entries(FIELDS[event.kind])) { const v = clean(get(props, path)); if (v !== null && v !== undefined) values[name] = v; }
   const hints = event.kind === 'stream' ? SETTING_HINTS.filter(p => get(props, p) !== undefined) : [];
   const out = {spanId: event.spanId, kind: event.kind, turn: Number.isSafeInteger(event.turn) && event.turn > 0 ? event.turn : null, partial: event.partial || detail.isPartial !== false, values, settingKeys: hints};
+  if (Number.isSafeInteger(event.traceOrder)&&event.traceOrder>=0)out.traceOrder=event.traceOrder;
+  if(typeof event.startTimeNs==='string'&&/^[0-9]{16,22}$/.test(event.startTimeNs))out.startTimeNs=event.startTimeNs;
   if (event.kind === 'stream') {
     const otelReasoning = count(get(props, 'gen_ai.usage.reasoning_tokens'));
     if(otelReasoning !== null) {
@@ -353,6 +378,8 @@ function sanitizeDetail(input) {
     const values = {};
     for (const [name, [, clean]] of Object.entries(FIELDS[s.kind])) { const v = clean(s.values?.[name]); if (v !== null && v !== undefined) values[name] = v; }
     const entry = {spanId: s.spanId, kind: s.kind, turn: count(s.turn) && s.turn > 0 ? s.turn : null, partial: s.partial !== false, values, settingKeys: Array.isArray(s.settingKeys) ? s.settingKeys.filter(k => SETTING_HINTS.includes(k)) : []};
+    if(Number.isSafeInteger(s.traceOrder)&&s.traceOrder>=0)entry.traceOrder=s.traceOrder;
+    if(typeof s.startTimeNs==='string'&&/^[0-9]{16,22}$/.test(s.startTimeNs))entry.startTimeNs=s.startTimeNs;
     for (const name of ['providerMeta', 'providerOptions']) { const m = s[name]; if (m && typeof m === 'object' && !Array.isArray(m)) { const clean = {}; let n = 0; for (const [k, v] of Object.entries(m)) { if (n++ >= META_LIMITS.entries) break; if (typeof k !== 'string' || k.length > 250) continue; if(SECRET_KEY.test(k)){clean[k]='<redacted>';continue;} if (typeof v === 'number' && Number.isFinite(v) || typeof v === 'boolean' || v === null) clean[k] = v; else if (typeof v === 'string' && v.length <= META_LIMITS.string && !/\s/.test(v) && !/^eyJ/.test(v) || typeof v === 'string' && /^<[a-z]+(:\d+)?>$/.test(v)) clean[k] = v; } if (Object.keys(clean).length) entry[name] = clean; } }
     if (s.kind === 'stream' && Array.isArray(s.reasoning)) entry.reasoning = s.reasoning.slice(0,60).filter(e => e && ['effort','budget','mode'].includes(e.kind)).flatMap(e => {
       const config = e.kind === 'effort' ? {reasoning_effort:e.level || '[unsupported]'} : e.kind === 'budget' ? {thinking:{budget_tokens:e.value}} : {thinking:{type:e.value}};
@@ -2740,6 +2767,7 @@ const now = () => performance.now();
 function nativeActive() { return BUS.captureMode === 'cdp' && Date.now() - (BUS.nativeLastSeen || 0) < 15000; }
 function beginTurn(url = '') {
   BUS.generation++;
+  BUS.thinkingStop = null;
   BUS.evidence.length = 0;
   BUS.observations.length = 0;
   BUS.emit({ kind: 'turn-start', data: { url, generation: BUS.generation } });
@@ -4654,7 +4682,8 @@ class HUD {
     const facts = extras.reasoningFacts || {};
     const reasoning = extras.reasoning || facts.effort || {};
     const observation = facts.observation || {};
-    const ambiguous = facts.coverage === 'ambiguous' || (facts.traceDetail?.calls?.length || 0) > 1 || (extras.realModel?.all?.length || 0) > 1;
+    const latestCall=(facts.traceDetail?.calls?.length||0)>1?facts.latestCall:null;
+    const ambiguous = !latestCall && (facts.coverage === 'ambiguous' || (facts.traceDetail?.calls?.length || 0) > 1 || (extras.realModel?.all?.length || 0) > 1);
     const observedLabel = observation.status === 'conflict' ? '冲突（来源数值不一致）'
       : observation.status === 'reported-positive' ? `${observation.tokens} tokens（报告值 > 0）`
       : observation.status === 'reported-zero' ? '0 tokens（报告值，不等于证明未思考）' : '未提供';
@@ -4670,8 +4699,8 @@ class HUD {
     const real = extras.realModel;
     const realBlock = real
       ? `<div class="verdict real">
-            <div class="mode">${real.historical ? '本会话最近保存的模型标签' : '运行记录中的模型标签'}</div>
-            <div class="model">${esc(modelLabel(real.name, reasoning, {historical:real.historical, ambiguous}))}</div>
+            <div class="mode">${real.historical ? '本会话最近保存的模型标签' : latestCall ? '最新调用 · '+(latestCall.order==='start-time'?'按开始时间':'按 Trace 顺序') : '运行记录中的模型标签'}</div>
+            <div class="model">${esc(modelLabel(latestCall && !real.historical ? latestCall.requestModel || '最新调用（型号未提供）' : real.name, reasoning, {historical:real.historical, ambiguous}))}</div>
             <div class="ev mono">runId: ${esc(real.runId || '-')}${real.tokens && real.tokens.length ? ' · tokens ' + esc(real.tokens.join(',')) : ''}</div>
             ${real.all && real.all.length > 1
               ? `<div class="ev">本轮出现: ${esc(real.all.map(name=>modelLabel(name, {}, {historical:real.historical, ambiguous:true})).join(', '))}</div>` : ''}
@@ -4728,9 +4757,9 @@ class HUD {
         <div class="overview" role="status"><span class="dot ${dotCls}" aria-hidden="true"></span><span>${!v ? '等待观测' : v.mode === 'RESOLVED' ? '已确认模型' : v.mode === 'INFERRED' ? '推断结果 · 请核实' : '尚未确认模型'} · ${esc(vd.mode)}</span></div>
         ${realBlock}
         <section class="verdict primary" aria-label="模型判定">
-          <div class="mode">模型判定 · ${esc(vd.mode)}</div>
-          <div class="model">${esc(v ? modelLabel(vd.label || vd.modelId || '未识别', reasoning, {historical:vd.source === 'conversation.history', ambiguous}) : vd.label)}</div>
-          ${vd.modelId && vd.label && vd.modelId !== vd.label ? `<div class="ev mono">id: <b>${esc(vd.modelId)}</b></div>` : ''}
+          <div class="mode">${latestCall ? '最新调用' : '模型判定'} · ${esc(vd.mode)}</div>
+          <div class="model">${esc(v ? modelLabel(latestCall && vd.source !== 'conversation.history' ? latestCall.requestModel || '最新调用（型号未提供）' : vd.label || vd.modelId || '未识别', reasoning, {historical:vd.source === 'conversation.history', ambiguous}) : vd.label)}</div>
+          ${!latestCall && vd.modelId && vd.label && vd.modelId !== vd.label ? `<div class="ev mono">id: <b>${esc(vd.modelId)}</b></div>` : ''}
           <div class="bar" role="progressbar" aria-label="判定规则分" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(0,Math.min(100,conf))}"><i style="width:${Math.max(0,Math.min(100,conf))}%"></i></div>
           <div class="meta">
             <span class="tag ${this.confidenceClass(vd.confidence || 0)}">规则分 ${conf}%</span>
@@ -4741,8 +4770,10 @@ class HUD {
           </div>
           ${vd.note ? `<div class="ev">${esc(vd.note)}</div>` : ''}
         </section>
+        <section class="group" data-reasoning-inspector aria-label="思考等级检查明细"></section>
         <section class="group" aria-label="显式推理配置">
-          <div class="sec">推理强度 · 显式配置</div>
+          <div class="sec">推理强度 · 显式配置${latestCall ? '（最新调用）' : ''}</div>
+          ${latestCall ? `<div class="ev mono">Span: ${esc(latestCall.spanId)}${latestCall.partial ? ' · 尚未完成，不沿用上一调用档位' : ''}</div>` : ''}
           <div class="row"><span class="k">档位</span><span class="v">${esc(reasoning.display || reasoning.level || '未知 / 未暴露')}</span></div>
           ${reasoning.budgetText ? `<div class="row"><span class="k">预算</span><span class="v">${esc(reasoning.budgetText)}（不换算为档位）</span></div>` : ''}
           ${reasoning.modes?.length ? `<div class="row"><span class="k">思考模式</span><span class="v">${esc(reasoning.modes.join(' / '))}</span></div>` : ''}
@@ -4788,6 +4819,7 @@ class HUD {
         </div>
         <section class="activity" aria-label="活动记录"><div class="sec">活动记录</div><div class="log" role="log">${this.logs.join('')}</div></section>
       </div>`;
+    if(typeof window!=='undefined')window.__ARENA_USERSCRIPT__?.reasoningInspector?.mount?.(this.root.querySelector?.('[data-reasoning-inspector]'));
     const body=this.root.querySelector?.('.bd');
     if(body){
       if(quotaCard)body.prepend(quotaCard);
@@ -5848,6 +5880,7 @@ __mods["notifier"] = { fn: function (exp) {
         if (!turn || turn.done || info.generation !== turn.generation) return false;
         observe();turn.done = true; // Mark before fetch: duplicate completion/failure never retries.
         if (turn.blocked || turn.gacha || !turn.sessionId) return false;
+        if(BUS.thinkingStop?.generation===turn.generation && BUS.thinkingStop.url==='https://arena.ai/agent/'+turn.sessionId)return false;
         return await broadcast({
           title:'Arena 会话生成结束', content:'当前会话已完成生成，请返回页面查看。',
           level:'success', source:'arena-model-probe', event:'session-completed',
@@ -5861,6 +5894,15 @@ __mods["notifier"] = { fn: function (exp) {
     return {start, observe, complete};
   }
   exp.createCompletionBroadcastGate = createCompletionBroadcastGate;
+  function broadcastThinkingDetected(generation, stopped) {
+    const url=typeof location!=='undefined'?location.origin+location.pathname.replace(/\/$/,''):'';
+    if(!Number.isSafeInteger(generation)||generation!==BUS.generation||BUS.thinkingStop?.generation!==generation||BUS.thinkingStop?.url!==url)return Promise.resolve(false);
+    const id=/^https:\/\/arena\.ai\/agent\/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.exec(url)?.[1];
+    if(!id)return Promise.resolve(false);
+    return broadcast({title:'Arena 检测到思考控件',content:stopped?'检测到脑形图标及 Thinking/Thought，已点击停止生成。':'检测到脑形图标及 Thinking/Thought，但停止点击失败，请检查页面。',
+      level:'warning',source:'arena-model-probe',event:'thinking-detected',sessionId:id,url,generation,stopClicked:stopped===true,at:new Date().toISOString()});
+  }
+  exp.broadcastThinkingDetected = broadcastThinkingDetected;
   exp.broadcast = broadcast;
   exp.broadcastHit = broadcastHit;
   exp.broadcastStop = broadcastStop;
@@ -7494,6 +7536,7 @@ function boot(opts = {}) {
     notify: (title, body, meta) => notifier.notify(title, body, meta),
     /** 发送一条测试系统通知，检验权限与系统提示效果 */
     testNotification: () => notifier.testNotification(),
+    broadcastThinkingDetected: (generation,stopped) => notifier.broadcastThinkingDetected(generation,stopped),
     /** 开启或关闭会话结束系统通知 */
     setNotificationEnabled: (val) => { const r = notifier.setEnabled(val); if (state.hud) recompute('notify-toggle'); return r; },
     /** 查询会话结束系统通知当前是否开启 */

@@ -10,8 +10,8 @@
   const MAX_GET = 3, MAX_POST = 2;
   const cache = new Map(), lookups = new Map(), writes = new Map(), revisions = new Map();
   const queue = [], queued = new Set(), managed = new Map(), pending = new Map();
-  let activeGets = 0, activePosts = 0, stopped = false, watched = null, scheduled = false;
-  let helperReady = false, sequence = 0;
+  let activeGets = 0, activePosts = 0, stopped = false, watched = [], scheduled = false;
+  let helperReady = false, sequence = 0, currentId = null;
   const stats = {saved:0,found:0,missing:0,errors:0,lastError:''};
   const now = () => Date.now();
   // The grant-free page script talks to a separate privileged helper by string-only DOM events.
@@ -86,7 +86,7 @@
   }
   function titleIn(anchor) {
     // arena_agent_sidebar.html: the title is a direct span under the chat link; icons are siblings.
-    return anchor.querySelector(':scope > span.body-sm.truncate');
+    return anchor.querySelector(':scope > span.body-sm.truncate') || anchor.querySelector(':scope > span.truncate');
   }
   function paint(anchor, id, model) {
     const title = titleIn(anchor);
@@ -108,10 +108,12 @@
       managed.delete(title);
     }
   }
+  function sidebars(){
+    const all=document.querySelectorAll?.('[data-sidebar="sidebar"]');
+    return all?Array.from(all):[document.querySelector?.('[data-sidebar="sidebar"]')].filter(Boolean);
+  }
   function repaint(id, model) {
-    const sidebar = document.querySelector?.('[data-sidebar="sidebar"]');
-    if (!sidebar) return;
-    for (const anchor of sidebar.querySelectorAll('a[data-sidebar="menu-button"][href]')) {
+    for (const sidebar of sidebars()) for (const anchor of sidebar.querySelectorAll('a[data-sidebar="menu-button"][href]')) {
       if (idFromHref(anchor.getAttribute('href')) === id) paint(anchor, id, model);
     }
   }
@@ -123,13 +125,10 @@
     repaint(id, model);
   }
   function observeModels() {
-    let known;
-    try { known = window.__MODEL_PROBE__?.conversationModels?.(); }
-    catch { return; }
-    if (!known || typeof known !== 'object') return;
-    for (const [rawId, rawModel] of Object.entries(known)) {
-      const id = validId(rawId), model = normalizeModel(rawModel);
-      if (!id || !model) continue; // Only models already matched to real Arena conversation IDs.
+    let observed;try { observed=api.reasoningInspector?.uploadModel?.(); } catch { return; }
+    const id=validId(observed?.sessionId), model=normalizeModel(observed?.model);
+    if(!id||!model||observed.source!=='reasoning-inspector'||id!==idFromHref(location.href))return;
+    {
       let entry = writes.get(id);
       if (!entry) {
         const confirmedName = cache.get(id)?.model === model && cache.get(id)?.until > now() ? model : null;
@@ -150,7 +149,7 @@
       request('POST', id, sent).then(response => {
         if (frozen() || epoch !== api.accounts?.epoch?.()) return;
         confirmed(response, id, sent);
-        entry.confirmed = sent; stats.saved++;
+        entry.confirmed = sent; stats.saved++; stats.lastError='';
         if (entry.wanted === sent) remember(id, sent);
       }).catch(error => {
         if (frozen()) return;
@@ -163,8 +162,13 @@
       }).finally(() => { entry.running = false; activePosts--; pumpWrites(); });
     }
   }
-  function enqueue(id) {
+  function enqueue(id, force=false) {
     const status = lookups.get(id);
+    if(force&&!status?.pending){
+      lookups.delete(id);const saved=cache.get(id);if(saved)saved.until=0;
+      if(queued.has(id)){const i=queue.indexOf(id);if(i>=0)queue.splice(i,1);queue.unshift(id);return;}
+      queued.add(id);queue.unshift(id);return;
+    }
     if (status?.pending || status?.until > now() || queued.has(id)) return;
     queued.add(id); queue.push(id);
   }
@@ -191,7 +195,7 @@
         }
         const model = confirmed(response, id);
         cache.set(id, {model, until:now() + FOUND_MS});
-        lookups.set(id, {until:now() + FOUND_MS}); stats.found++;
+        lookups.set(id, {until:now() + FOUND_MS}); stats.found++; stats.lastError='';
         repaint(id, model);
       }).catch(error => {
         if (frozen()) return;
@@ -205,13 +209,12 @@
     setTimeout(() => { scheduled = false; tick(); }, 0);
   }) : null;
   function scanSidebar() {
-    const sidebar = document.querySelector?.('[data-sidebar="sidebar"]') || null;
-    if (sidebar !== watched) {
-      observer?.disconnect(); watched = sidebar;
-      if (sidebar) observer?.observe(sidebar, {subtree:true, childList:true, characterData:true});
+    const roots=sidebars();
+    if(roots.length!==watched.length||roots.some((node,i)=>node!==watched[i])){
+      observer?.disconnect();watched=roots;
+      for(const sidebar of roots)observer?.observe(sidebar,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['href']});
     }
-    if (!sidebar) return;
-    for (const anchor of sidebar.querySelectorAll('a[data-sidebar="menu-button"][href]')) {
+    for (const sidebar of roots) for (const anchor of sidebar.querySelectorAll('a[data-sidebar="menu-button"][href]')) {
       const id = idFromHref(anchor.getAttribute('href'));
       if (!id) continue;
       const saved = cache.get(id);
@@ -222,8 +225,11 @@
   }
   function tick() {
     if (frozen()) return;
+    const routeId=idFromHref(location.href);
+    if(routeId!==currentId){currentId=routeId;if(currentId)enqueue(currentId,true);}
+    else if(currentId)enqueue(currentId);
     observeModels(); scanSidebar();
-    if (!transport()) { stats.lastError = '请另装并启用会话模型跨域助手脚本'; return; }
+    if (!transport()) { stats.lastError = '请另装并启用会话模型跨域助手脚本';try{emit('ping','v1');}catch{}return; }
     pumpWrites(); pumpLookups();
   }
   function halt() {
@@ -235,10 +241,13 @@
   window.addEventListener?.('amp:account', halt);
   window.addEventListener?.('pagehide', halt);
   api.sessionModels = {version:2, refresh:tick, status:() => ({
-    stopped:frozen(), transport:!!transport(), endpoint:ENDPOINT,
+    stopped:frozen(), transport:!!transport(), endpoint:ENDPOINT, currentSessionId:currentId, currentModel:cache.get(currentId)?.model||null,
     saved:stats.saved, found:stats.found, missing:stats.missing,
     errors:stats.errors, lastError:stats.lastError,
   })};
+  window.addEventListener?.('popstate',tick);
+  window.addEventListener?.('hashchange',tick);
+  window.navigation?.addEventListener?.('navigatesuccess',tick);
   setInterval(tick, 1200);
   if (document.body) tick();
   else document.addEventListener('DOMContentLoaded', tick, {once:true});

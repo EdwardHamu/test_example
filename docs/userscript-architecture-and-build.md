@@ -1,5 +1,11 @@
 # Arena 用户脚本：整体架构与打包指南
 
+> 2026.09.26.6：完整思考检查明细嵌入探针 HUD，模型上传仅使用检查内部名，当前会话独立优先查询并在切换时刷新缓存，兼容多侧栏回填。仍为 17 个源码模块，详见 [检查融合与模型同步修复](userscript-reasoning-hud-sync.md)。
+
+> 2026.09.26.5：新增 THOUGHTSTOP 模块，非抽卡生成中最新消息出现 Brain + Thinking/Thought 控件时立即点击停止并发送服务器通知；当前 17 个源码模块、14 个 load 包装模块，manifest 新增 thinkingStop。详见 [思考控件停止与通知](userscript-thinking-stop.md)。
+
+> 2026.09.26.4：多调用时根据开始时间或已保留的 Trace 顺序展示最新调用的模型名及显式思考等级；顺序不明、最新调用未完成或缺少字段不沿用旧档位。详见 [最新调用思考等级](userscript-latest-call-reasoning.md)。
+
 > 2026.09.26.3：普通会话完成且非抽卡轮次时向现有通知接口广播，复用 notifier 完成检测与 broadcast，通过 probe 补丁接入；源码模块仍为 16 个。详见 [普通会话完成通知](userscript-session-completion-broadcast.md)。
 
 > 2026.09.26.2：探针模型标题与思考等级检查卡片统一显示“模型名 · 思考等级”。显式值之外标注未知/冲突/不支持；历史记录和多调用概览不套用当前档位。仅展示变化，不改模型 ID 或同步数据。
