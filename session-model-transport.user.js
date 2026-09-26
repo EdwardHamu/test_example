@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 模型助手 · 会话模型跨域助手
 // @namespace    arena-model-companion.transport.local
-// @version      2026.09.26.8
+// @version      2026.09.26.9
 // @description  仅向固定的 meamoe.top 会话模型接口同步会话 ID 与模型名，供主脚本调用
 // @match        https://arena.ai/*
 // @run-at       document-start

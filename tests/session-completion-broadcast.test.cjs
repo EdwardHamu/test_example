@@ -31,10 +31,10 @@ test('account changes or route switches invalidate completion, even if switched 
 test('create-chat may acquire its first UUID after starting on /agent',async()=>{const e=setup();e.location.pathname='/agent';e.start();e.location.pathname='/agent/'+id;e.gate.observe();await e.end();assert.equal(e.calls.length,1);});
 test('non-agent pages and unresolved landing page never notify',async()=>{for(const p of ['/agent','/','/settings']){const e=setup();e.location.pathname=p;e.start();await e.end();assert.equal(e.calls.length,0,p);}});
 test('stale and invalid generations never notify',async()=>{const e=setup();e.start();e.bus.generation=2;await e.end();assert.equal(e.calls.length,0);e.start(2);await e.end(1);await e.end(2);assert.equal(e.calls.length,1);for(const generation of [0,-1,NaN,2.5]){const n=setup();n.start(generation);await n.end(generation);assert.equal(n.calls.length,0);}});
-test('concurrent callbacks and network failures are not retried',async()=>{const e=setup({fail:true});e.start();await Promise.all([e.end(),e.end(),e.end()]);assert.equal(e.calls.length,1);await e.end();assert.equal(e.calls.length,1);});
+test('legacy-server concurrent callbacks and network failures are not blindly retried',async()=>{const e=setup({fail:true});e.start();await Promise.all([e.end(),e.end(),e.end()]);assert.equal(e.calls.length,1);await e.end();assert.equal(e.calls.length,1);});
 test('watcher confirms after debounce, keeps local callback, and notifies with local notifications off',async()=>{
  const e=setup({patched:true});let local=0;e.notifier.setEnabled(false);e.notifier.initSessionWatcher({onTurnStart:e.gate.start,onTurnProgress:e.gate.observe,onSessionEnd:info=>{local++;void e.gate.complete(info);}});
- e.bus.emit({kind:'turn-start',data:{generation:1}});assert.equal(e.calls.length,0);e.bus.emit({kind:'observation',data:{complete:true}});assert.equal(e.calls.length,0);e.flush();await Promise.resolve();assert.equal(e.calls.length,1);assert.equal(local,1);
+ e.bus.emit({kind:'turn-start',data:{generation:1}});assert.equal(e.calls.length,0);e.bus.emit({kind:'observation',data:{complete:true}});assert.equal(e.calls.length,0);e.flush();for(let n=0;n<30;n++)await Promise.resolve();assert.equal(e.calls.length,1);assert.equal(local,1);
  e.bus.emit({kind:'observation',data:{complete:true}});e.flush();assert.equal(e.calls.length,1);assert.equal(local,1);
 });
 test('DOM generating blocks watcher completion and DOM polling observes mid-turn gacha',async()=>{

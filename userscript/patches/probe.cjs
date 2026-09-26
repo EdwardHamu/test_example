@@ -37,7 +37,20 @@ replaceOnce('次要目标 sol / opus / gemini 不停止，等待40秒再继续',
 replaceOnce("      if (notifier.isAutoEscEnabled()) {\n        const ok = notifier.triggerEscapeKey();\n        state.hud?.log(ok ? '已自动触发 Esc；下一轮抽卡仍需等待冷却结束。' : 'Esc 触发失败；下一轮抽卡仍需等待冷却结束。');\n      }".replace(/\n/g, probe.includes("\r\n") ? "\r\n" : "\n"), "      // Auto Escape is driven by composer disappearance (userscript-composer-auto-esc.js)." );
 
 // Reuse the existing debounced completion watcher; no second detector.
-replaceOnce("  notifier.initSessionWatcher({", "  const completionBroadcast = notifier.createCompletionBroadcastGate();\n  notifier.initSessionWatcher({\n    onTurnStart: completionBroadcast.start,\n    onTurnProgress: completionBroadcast.observe,");
+replaceOnce("  notifier.initSessionWatcher({", `  const completionBroadcast = notifier.createCompletionBroadcastGate();
+  if(window.__ARENA_USERSCRIPT__)window.__ARENA_USERSCRIPT__.completionNotifications={status:()=>({...completionBroadcast.status(),delivery:notifier.notificationDeliveryStatus()})};
+  const notificationLogKeys=new Map();
+  BUS.on(event=>{
+    if(event.kind!=='notification-status'||!event.data)return;
+    const d=event.data;if(d.phase==='generating')return;
+    const key=d.event+':'+d.generation,stamp=d.phase+':'+d.reason+':'+d.attempts;
+    if(notificationLogKeys.get(key)===stamp)return;
+    notificationLogKeys.set(key,stamp);if(notificationLogKeys.size>32)notificationLogKeys.delete(notificationLogKeys.keys().next().value);
+    state.hud?.log('通知 · '+notifier.notificationStatusText(d),d.phase==='failed'?'warn':'info');
+  });
+  notifier.initSessionWatcher({
+    onTurnStart: completionBroadcast.start,
+    onTurnProgress: completionBroadcast.observe,`);
 replaceOnce("    onSessionEnd: (info) => {", "    onSessionEnd: (info) => {\n      void completionBroadcast.complete(info);");
 
 return probe;

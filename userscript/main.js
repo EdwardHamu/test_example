@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Arena 模型助手 · Assets 整合版
 // @namespace    arena-model-companion.local
-// @version      2026.09.26.8
+// @version      2026.09.26.9
 // @description  页面主环境模型探针、抽卡、通知及会话显示；会话模型跨域同步需另装助手脚本
 // @match        https://arena.ai/*
 // @match        https://10minutemail.one/*
@@ -16,7 +16,7 @@
 'use strict';
 if(window.top!==window||!['arena.ai','10minutemail.one'].includes(location.hostname))return;
 if(window.__ARENA_USERSCRIPT__)return;
-const api=window.__ARENA_USERSCRIPT__={version:'2026.09.26.8',loaded:[],errors:[]};
+const api=window.__ARENA_USERSCRIPT__={version:'2026.09.26.9',loaded:[],errors:[]};
 function load(name,fn){try{const result=fn();api.loaded.push(name);return result;}catch(e){api.errors.push({name,message:String(e.message||e)});console.warn('[Arena userscript]',name,e);}}
 load('AuthBridge.js',()=>{
 __BUILD_AUTH__
