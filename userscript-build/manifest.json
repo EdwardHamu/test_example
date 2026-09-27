@@ -1,14 +1,14 @@
 {
   "version": "2026.09.26.9",
   "assets": {
-    "AuthBridge.js": "4c13810b3399aedb1a34de59ca1111498cb7a9b5303fa1362940be6519b5e750",
-    "PageBridge.js": "f51cb3967f4364b20e4a1521d635cbe9e907e71c7b827b28d61509309d64bd2c",
-    "CandidateBridge.js": "c17e5c32e2b8f8b24cbd099f761e383caaec103f3812b90a01e4321d65cb80e7",
-    "ConversationRecovery.js": "3305003f6676872708d7fcc6ba1abb73c8bb5a5f73c98f3dacebc409c72228a8",
+    "AuthBridge.js": "b3a38c81d21f5c5a2688028664742dedc881aeec5bfd9f3eef561487f6cf2233",
+    "PageBridge.js": "41a92a2aff4942ab3520a910677293b65d52b4f70d08cec2f7005b0298ff2eb7",
+    "CandidateBridge.js": "c96b6532db160c80c1c4f11cc0000a365af47fefd8a448cc8e933fc0dd774afc",
+    "ConversationRecovery.js": "3d438e694bea7aace5a71272896174043f67e64e021d9347f459c44d3f62cb6f",
     "FollowLatest.js": "016f081562a0eda5f039348459d97f913b882c7f720e728f87306619538f2329",
     "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
     "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
-    "arena-model-probe.inject.js": "2cbf98ea490d83d04bbe6c65c38960d24291c84e64a135bf95bf8e97f2b2ad6c"
+    "arena-model-probe.inject.js": "20393f451708d5ae72dce6e48ffe78a116b625811a12dbd668081105cc48c007"
   },
   "modularSources": {
     "userscript/main.js": "39de11cc73764ef110844ac4aab74def4990cec8f65bbc31d27f4828d14f26fe",
@@ -18,11 +18,11 @@
     "userscript/patches/probe.cjs": "042017518d599fea3b8ed1ac8ae92a63c147896c39a1ff2d1d10a433ca31d666"
   },
   "resources": {
-    "welcome.html": "b826959621dc4435e40e2e6633cce0e871fa040b92dd9efaf30d5a6d7e727ac4",
-    "demo.html": "6fc650638e60af2285ba51e363aa047b4299df794ea46b28dd27852c23918516",
-    "gallery.html": "60ff535554b21e25df64c3f85885b0e5226895be05937b560f8993dfeed05739",
-    "WebView2-LICENSE.txt": "24deadea987f1c7682753a8cef4e70bde8a13cc65684e06cab9a965469362075",
-    "WebView2-NOTICE.txt": "9dd2e51ad1f27741d0cbf74227d03fecf55c43e3081501f9d7f553b16d33835e"
+    "welcome.html": "e8155c5624c8bc4438548f398873629d8f7ad807e3fe0f634a9f0fa63d089d54",
+    "demo.html": "529f63f278036343b74cdf2cd97eb7625efeede61f88c15adf226872cdfc3f6a",
+    "gallery.html": "f228ce00fc66804a769eac200eb96e077fcd2b2c66b79848ef370aac6afb433d",
+    "WebView2-LICENSE.txt": "0af8f1b807512aae39c2ac1aa4d0cae65cabecb6fd554b8439a5162a0d6eca55",
+    "WebView2-NOTICE.txt": "106423785c5b7eba0a8e61d1837f2132e9c828e20ad530f565d981c1df60dd90"
   },
   "adapter": "b7336bbdbe0007f0c7e2eddbccd75860d6b2db48bdd43fb85a43c36b59825e8e",
   "sessionModels": "9fa57fbb1ee7999e3e7354f3d077771baca950ecf3723278feeeb3feafd672e2",
@@ -34,8 +34,8 @@
   "taskReviewHider": "8290ee0c1984f09997d38d0b450afc218fd7fb1a6d3b0c093f96c0c79a243b77",
   "composerVisibility": "3a45c983411ea2d08753752eab035fb813b7cc51ab45ace00e52f00ed966d273",
   "composerAutoEsc": "8acfac52597ad67c712c6397d0ada7f0a8b59a717bc00808fe629e726c26dcf0",
-  "outputSha256": "7d5dd873763792e50dddaab63f5c20f643fdc1b63d52988ca02fa8766462861d",
-  "bytes": 551327,
+  "outputSha256": "1a89c671972b1e68153a04af7435f2d24984b676d6d6f28eb7d3fe96efab33da",
+  "bytes": 550588,
   "transportSha256": "fc68baae09c1a35c7bc1ebaa7b7d7e3ad06ecf71c07f76ac58b62abf2a8ee6b7",
   "transportBytes": 4870
 }
