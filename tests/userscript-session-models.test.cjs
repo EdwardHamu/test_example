@@ -12,7 +12,9 @@ const C = '33333333-3333-3333-3333-333333333333';
 const D = '44444444-4444-4444-4444-444444444444';
 
 function link(id, text, href = '/agent/' + id) {
-  const title = {textContent:text, isConnected:true};
+  const attrs = new Map();
+  const title = {textContent:text, isConnected:true, getAttribute:key=>attrs.get(key) ?? null,
+    setAttribute:(key,value)=>attrs.set(key,String(value)), removeAttribute:key=>attrs.delete(key)};
   return {title, href, getAttribute:key=>key==='href'?href:null,
     querySelector:selector=>selector===':scope > span.body-sm.truncate'?title:null};
 }
@@ -69,7 +71,7 @@ test('recognized conversation is POSTed by the separate GM helper, and only conf
   assert.equal(a.title.textContent,'Native A','no optimistic title before the server confirms the POST');
   answer(gets[1],B,'',404);answer(post,A,'astra-opus');await flush();
   answer(gets[0],A,'older server model');await flush(); // In-flight GET predates our POST.
-  assert.equal(a.title.textContent,'astra-opus');assert.equal(b.title.textContent,'Native B');
+  assert.equal(a.title.textContent,'astra-opus');assert.equal(a.title.getAttribute('title'),'astra-opus');assert.equal(b.title.textContent,'Native B');
   h.tick();h.tick();assert.equal(h.requests.length,3,'do not churn the 200-record server on every poll');
   assert.equal(h.api.sessionModels.status().saved,1);assert.equal(h.fetches(),0);
 });
@@ -99,7 +101,7 @@ test('React title changes are re-applied; a later server 404 restores the native
   assert.equal(a.title.textContent,'Model A');
   h.advance(300001);h.tick();assert.equal(h.requests.length,2);
   answer(h.requests[1],A,'',404);await flush();
-  assert.equal(a.title.textContent,'Reader renamed title');
+  assert.equal(a.title.textContent,'Reader renamed title');assert.equal(a.title.getAttribute('title'),null);
   h.tick();assert.equal(h.requests.length,2,'404 is negatively cached for a minute');
 });
 

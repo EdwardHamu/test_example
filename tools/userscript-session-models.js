@@ -96,20 +96,32 @@
   function paint(anchor, id, model) {
     const title = titleIn(anchor);
     if (!title) return;
+    const currentTitle = typeof title.getAttribute === 'function' ? title.getAttribute('title') : null;
     let record = managed.get(title);
     if (!record || record.id !== id) {
-      record = {id, original:title.textContent, applied:null};
+      record = {id, original:title.textContent, originalTitle:currentTitle, applied:null, titleApplied:null};
       managed.set(title, record);
     } else if (record.applied !== null && title.textContent !== record.applied) {
       record.original = title.textContent; // React or the reader changed the native title.
+    } else if (record.titleApplied !== null && currentTitle !== record.titleApplied) {
+      record.originalTitle = currentTitle; // React or the reader changed the native tooltip.
     }
     if (title.textContent !== model) title.textContent = model; // Text only; no HTML or Rename action.
+    if (typeof title.setAttribute === 'function') title.setAttribute('title', model); // Keep the full renamed label available on hover.
     record.applied = model;
+    record.titleApplied = model;
   }
   function restore(id) {
     for (const [title, record] of managed) {
       if (id && record.id !== id) continue;
       if (title.textContent === record.applied) title.textContent = record.original;
+      if (typeof title.getAttribute === 'function' && title.getAttribute('title') === record.titleApplied) {
+        if (record.originalTitle == null) {
+          if (typeof title.removeAttribute === 'function') title.removeAttribute('title');
+        } else if (typeof title.setAttribute === 'function') {
+          title.setAttribute('title', record.originalTitle);
+        }
+      }
       managed.delete(title);
     }
   }

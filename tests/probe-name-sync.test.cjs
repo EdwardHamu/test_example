@@ -9,7 +9,8 @@ const flush=async()=>{for(let n=0;n<16;n++)await Promise.resolve();};
 function fixture({probeName='Probe model',internal=null,requestName='Inspector request',ready=true,account='account-a',grant=true}={}){
  const requests=[],bridge=new Map(),events=new Map(),intervals=[],models=probeName?{[A]:probeName}:{};
  let scope=account,epoch=0,reload=false;
- const title={textContent:'Original title',isConnected:true};
+ const attrs=new Map();
+ const title={textContent:'Original title',isConnected:true,getAttribute:k=>attrs.get(k)??null,setAttribute:(k,v)=>attrs.set(k,String(v)),removeAttribute:k=>attrs.delete(k)};
  const anchor={getAttribute:k=>k==='href'?'/agent/'+A:null,querySelector:()=>title};
  const sidebar={querySelectorAll:()=>[anchor]};
  const listen=(map,name,fn)=>map.set(name,[...(map.get(name)||[]),fn]);
