@@ -1,5 +1,7 @@
 # Arena 用户脚本：整体架构与打包指南
 
+> 2026.09.26.17：提示音改为有粘性用户激活（`navigator.userActivation.hasBeenActive`）后才创建 AudioContext，消除“The AudioContext was not allowed to start”提示；完成/命中/验证三种提示音补 4 秒守卫定时器防止 `resume()` 挂起泄漏。控制台的 `<link rel=expect href="#_R_">` 提示来自页面 React 流式渲染，与脚本无关，不影响加载。详见 [控制台提示排查](userscript-audio-user-activation.md)。
+
 > 2026.09.26.16：美元额度卡片按实际 280px 宽度收紧：卡片内边距 12px、列间距 6px、环形 56px，金额 16px、说明文字 10px、基础字号 11px/1.45；标签缩短为“剩余 / 总额 / 已用 / 档位”，明细改为标签与数值同行（放不下时数值整体换行，标签不拆字），超限与陈旧提示改为“账户额度已超限”“快照超过 5 分钟，非实时余额”。常规数值下卡片高度约由 165px 降到 90px。详见 [美元额度三等分布局](userscript-usd-quota-thirds-layout.md)。
 
 > 2026.09.26.15：探针浮窗美元账户额度区域改为三等分网格 `repeat(3,minmax(0,1fr))`：环形指标、剩余金额、累计已用/额度档位各占一份，列宽不再随内容变化；长文本在各自格内换行，提示行独占整行，不再挤压相邻区域。详见 [美元额度三等分布局](userscript-usd-quota-thirds-layout.md)。

@@ -1,0 +1,250 @@
+TAP version 13
+# Subtest: no AudioContext is created before the page has sticky user activation
+ok 1 - no AudioContext is created before the page has sticky user activation
+  ---
+  duration_ms: 15.034035
+  ...
+# Subtest: window.navigator is honoured when navigator is not a global
+ok 2 - window.navigator is honoured when navigator is not a global
+  ---
+  duration_ms: 4.009942
+  ...
+# Subtest: every chime plays once the page has been activated, then releases its context
+ok 3 - every chime plays once the page has been activated, then releases its context
+  ---
+  duration_ms: 3.46826
+  ...
+# Subtest: environments without navigator.userActivation keep the previous behaviour
+ok 4 - environments without navigator.userActivation keep the previous behaviour
+  ---
+  duration_ms: 3.605608
+  ...
+# Subtest: a resume() that never settles is released by the guard timer without playing
+ok 5 - a resume() that never settles is released by the guard timer without playing
+  ---
+  duration_ms: 6.572195
+  ...
+# Subtest: a rejected resume() still releases the context and clears the guard
+ok 6 - a rejected resume() still releases the context and clears the guard
+  ---
+  duration_ms: 3.273711
+  ...
+# Subtest: the gate is local to each audio module and the userscript never references React expect markers
+ok 7 - the gate is local to each audio module and the userscript never references React expect markers
+  ---
+  duration_ms: 0.645207
+  ...
+# Subtest: full alert module loads and boot explicitly starts it
+ok 8 - full alert module loads and boot explicitly starts it
+  ---
+  duration_ms: 11.109242
+  ...
+# Subtest: visible Chinese and English verification dialogs detected
+ok 9 - visible Chinese and English verification dialogs detected
+  ---
+  duration_ms: 7.849586
+  ...
+# Subtest: ordinary dialog, hidden challenge and invisible ancestors ignored
+ok 10 - ordinary dialog, hidden challenge and invisible ancestors ignored
+  ---
+  duration_ms: 5.439349
+  ...
+# Subtest: known visible challenge frame detected but checkbox size and lookalike domains ignored
+ok 11 - known visible challenge frame detected but checkbox size and lookalike domains ignored
+  ---
+  duration_ms: 7.449474
+  ...
+# Subtest: one alarm per appearance, transient disappearance does not rearm
+ok 12 - one alarm per appearance, transient disappearance does not rearm
+  ---
+  duration_ms: 1.524499
+  ...
+# Subtest: notification switch suppresses warning and can enable an existing popup
+ok 13 - notification switch suppresses warning and can enable an existing popup
+  ---
+  duration_ms: 1.858117
+  ...
+# Subtest: restarting watcher cleans interval and old checks cannot sound
+ok 14 - restarting watcher cleans interval and old checks cannot sound
+  ---
+  duration_ms: 1.539006
+  ...
+# Subtest: detector and sound exceptions never escape into page
+ok 15 - detector and sound exceptions never escape into page
+  ---
+  duration_ms: 3.321043
+  ...
+# Subtest: warning plays three moderate pulses and releases AudioContext
+ok 16 - warning plays three moderate pulses and releases AudioContext
+  ---
+  duration_ms: 2.31577
+  ...
+# Subtest: boot starts choice watcher using the existing notification switch
+ok 17 - boot starts choice watcher using the existing notification switch
+  ---
+  duration_ms: 9.487968
+  ...
+# Subtest: matching interactive card is detected inside a transcript role=log
+ok 18 - matching interactive card is detected inside a transcript role=log
+  ---
+  duration_ms: 3.732449
+  ...
+# Subtest: scoped detection excludes a pending choice in another conversation log
+ok 19 - scoped detection excludes a pending choice in another conversation log
+  ---
+  duration_ms: 3.651195
+  ...
+# Subtest: class order, spacing and optional layout tokens do not matter
+ok 20 - class order, spacing and optional layout tokens do not matter
+  ---
+  duration_ms: 1.544146
+  ...
+# Subtest: outside transcript or missing signature stays silent
+ok 21 - outside transcript or missing signature stays silent
+  ---
+  duration_ms: 1.781051
+  ...
+# Subtest: single Copy button and non-interactive card stay silent; one radio qualifies
+ok 22 - single Copy button and non-interactive card stay silent; one radio qualifies
+  ---
+  duration_ms: 3.29997
+  ...
+# Subtest: saved HTML Summary shape is not an unanswered choice card
+ok 23 - saved HTML Summary shape is not an unanswered choice card
+  ---
+  duration_ms: 1.858731
+  ...
+# Subtest: hidden, inert, aria-hidden, zero-size and invisible ancestor are excluded
+ok 24 - hidden, inert, aria-hidden, zero-size and invisible ancestor are excluded
+  ---
+  duration_ms: 10.399649
+  ...
+# Subtest: disabled controls, disabled fieldsets and single remaining button are excluded
+ok 25 - disabled controls, disabled fieldsets and single remaining button are excluded
+  ---
+  duration_ms: 4.477383
+  ...
+# Subtest: rendered code examples are excluded
+ok 26 - rendered code examples are excluded
+  ---
+  duration_ms: 1.424229
+  ...
+# Subtest: deduplicates ongoing display and card children replacement without reading text
+ok 27 - deduplicates ongoing display and card children replacement without reading text
+  ---
+  duration_ms: 2.875752
+  ...
+# Subtest: stable metadata ID survives message replacement; another message alerts
+ok 28 - stable metadata ID survives message replacement; another message alerts
+  ---
+  duration_ms: 1.463147
+  ...
+# Subtest: boolean marker is not mistaken for a unique ID; batch arrival plays once
+ok 29 - boolean marker is not mistaken for a unique ID; batch arrival plays once
+  ---
+  duration_ms: 1.460579
+  ...
+# Subtest: notification off defers announcement until enabled, then stays deduplicated
+ok 30 - notification off defers announcement until enabled, then stays deduplicated
+  ---
+  duration_ms: 1.443057
+  ...
+# Subtest: choice appearance notifies the server once even when local notifications are disabled
+ok 31 - choice appearance notifies the server once even when local notifications are disabled
+  ---
+  duration_ms: 1.595308
+  ...
+# Subtest: a batch of new choices sends one notice; a later appearance is rearmed after two misses
+ok 32 - a batch of new choices sends one notice; a later appearance is rearmed after two misses
+  ---
+  duration_ms: 2.41479
+  ...
+# Subtest: server-notification callback failures do not break choice detection or sound
+ok 33 - server-notification callback failures do not break choice detection or sound
+  ---
+  duration_ms: 1.532
+  ...
+# Subtest: one missed poll is tolerated; two misses rearm a later choice
+ok 34 - one missed poll is tolerated; two misses rearm a later choice
+  ---
+  duration_ms: 1.588669
+  ...
+# Subtest: route change rearms IDs; reinjection stops old watcher and stop cancels polling
+ok 35 - route change rearms IDs; reinjection stops old watcher and stop cancels polling
+  ---
+  duration_ms: 1.423824
+  ...
+# Subtest: detector and asynchronous sound errors do not escape
+ok 36 - detector and asynchronous sound errors do not escape
+  ---
+  duration_ms: 3.534499
+  ...
+# Subtest: four distinct ding-dong notes and context release after end
+ok 37 - four distinct ding-dong notes and context release after end
+  ---
+  duration_ms: 2.284133
+  ...
+# Subtest: suspended audio resumes; blocked or missing audio is harmless
+ok 38 - suspended audio resumes; blocked or missing audio is harmless
+  ---
+  duration_ms: 3.763992
+  ...
+# Subtest: fallback timeout releases audio once even without onended
+ok 39 - fallback timeout releases audio once even without onended
+  ---
+  duration_ms: 2.223578
+  ...
+# Subtest: chime lasts 1.5 seconds with moderate 0.20 peak and soft envelope; context closes
+ok 40 - chime lasts 1.5 seconds with moderate 0.20 peak and soft envelope; context closes
+  ---
+  duration_ms: 3.387787
+  ...
+# Subtest: one custom chime per notification with granted permission
+ok 41 - one custom chime per notification with granted permission
+  ---
+  duration_ms: 1.403431
+  ...
+# Subtest: one custom chime per notification with denied permission
+ok 42 - one custom chime per notification with denied permission
+  ---
+  duration_ms: 1.084767
+  ...
+# Subtest: one custom chime per notification with missing permission
+ok 43 - one custom chime per notification with missing permission
+  ---
+  duration_ms: 1.252713
+  ...
+# Subtest: one custom chime per notification with default permission
+ok 44 - one custom chime per notification with default permission
+  ---
+  duration_ms: 1.200216
+  ...
+# Subtest: disabled notifications do not play sound
+ok 45 - disabled notifications do not play sound
+  ---
+  duration_ms: 1.031664
+  ...
+# Subtest: suspended audio resumes before scheduling
+ok 46 - suspended audio resumes before scheduling
+  ---
+  duration_ms: 1.340544
+  ...
+# Subtest: audio resume failure is contained and context released
+ok 47 - audio resume failure is contained and context released
+  ---
+  duration_ms: 1.335817
+  ...
+# Subtest: full notifier module loads and preserves legacy chime export
+ok 48 - full notifier module loads and preserves legacy chime export
+  ---
+  duration_ms: 13.920699
+  ...
+1..48
+# tests 48
+# suites 0
+# pass 48
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 447.476498

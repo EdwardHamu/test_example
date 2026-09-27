@@ -5412,15 +5412,21 @@ __mods["notifier"] = { fn: function (exp) {
 
   // A longer, moderately louder completion chime; system notification audio stays silent.
   async function playCompletionChime() {
-    let ctx;
+    let ctx, guard = null, closed = false;
     const close = () => {
+      if (closed) return;
+      closed = true;
+      if (guard !== null && typeof clearTimeout === 'function') clearTimeout(guard);
       try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch { /* noop */ }
     };
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
+      if (!AudioCtx || !audioUnlocked()) return;
       ctx = new AudioCtx();
+      // Release the context if resume() never settles or onended never arrives.
+      if (typeof setTimeout === 'function') guard = setTimeout(close, 4000);
       if (ctx.state === 'suspended') await ctx.resume();
+      if (closed) return;
       const t = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -5442,13 +5448,20 @@ __mods["notifier"] = { fn: function (exp) {
 
   // 抽卡命中目标模型时播放的欢快大调和弦升音 (C5 -> E5 -> G5 -> C6)
   async function playHitChime() {
-    let ctx;
-    const close = () => { try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {} };
+    let ctx, guard = null, closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (guard !== null && typeof clearTimeout === 'function') clearTimeout(guard);
+      try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {}
+    };
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
+      if (!AudioCtx || !audioUnlocked()) return;
       ctx = new AudioCtx();
+      if (typeof setTimeout === 'function') guard = setTimeout(close, 4000);
       if (ctx.state === 'suspended') await ctx.resume();
+      if (closed) return;
       const t0 = ctx.currentTime;
       [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
         const t = t0 + idx * 0.12;
@@ -5464,8 +5477,20 @@ __mods["notifier"] = { fn: function (exp) {
         osc.start(t);
         osc.stop(t + 0.45);
       });
-      setTimeout(close, 1200);
+      if (typeof setTimeout === 'function') { if (guard !== null && typeof clearTimeout === 'function') clearTimeout(guard); guard = setTimeout(close, 1200); }
     } catch { close(); }
+  }
+
+  // Chromium only lets an AudioContext start after the page has sticky user activation; creating one
+  // earlier logs "The AudioContext was not allowed to start" and leaves it suspended forever. Skip the
+  // chime instead (notifications/title flash still fire). Unknown environments keep the old behaviour.
+  function audioUnlocked() {
+    try {
+      const nav = typeof navigator !== 'undefined' ? navigator : (typeof window !== 'undefined' ? window.navigator : undefined);
+      const activation = nav && nav.userActivation;
+      if (activation && typeof activation.hasBeenActive === 'boolean') return activation.hasBeenActive;
+    } catch { /* noop */ }
+    return true;
   }
 
   function flashTitle(badgeText = '回答完成', times = 4) {
@@ -6042,14 +6067,32 @@ __mods["captcha-alert"] = { fn: function (exp) {
     }
     return false;
   }
+  // Chromium only lets an AudioContext start after the page has sticky user activation; creating one
+  // earlier logs "The AudioContext was not allowed to start" and leaves it suspended forever. Skip the
+  // chime instead (notifications/title flash still fire). Unknown environments keep the old behaviour.
+  function audioUnlocked() {
+    try {
+      const nav = typeof navigator !== 'undefined' ? navigator : (typeof window !== 'undefined' ? window.navigator : undefined);
+      const activation = nav && nav.userActivation;
+      if (activation && typeof activation.hasBeenActive === 'boolean') return activation.hasBeenActive;
+    } catch { /* noop */ }
+    return true;
+  }
   async function playWarning() {
-    let ctx;
-    const close = () => { try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {} };
+    let ctx, guard = null, closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (guard !== null && typeof clearTimeout === 'function') clearTimeout(guard);
+      try { if (ctx) Promise.resolve(ctx.close()).catch(() => {}); } catch {}
+    };
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
+      if (!AudioCtx || !audioUnlocked()) return;
       ctx = new AudioCtx();
+      if (typeof setTimeout === 'function') guard = setTimeout(close, 4000);
       if (ctx.state === 'suspended') await ctx.resume();
+      if (closed) return;
       const t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.type = 'sine';
       gain.gain.setValueAtTime(0.0001, t);
@@ -6125,6 +6168,17 @@ __mods["choice-alert"] = { fn: function (exp) {
     }
     return [...messages];
   }
+  // Chromium only lets an AudioContext start after the page has sticky user activation; creating one
+  // earlier logs "The AudioContext was not allowed to start" and leaves it suspended forever. Skip the
+  // chime instead (notifications/title flash still fire). Unknown environments keep the old behaviour.
+  function audioUnlocked() {
+    try {
+      const nav = typeof navigator !== 'undefined' ? navigator : (typeof window !== 'undefined' ? window.navigator : undefined);
+      const activation = nav && nav.userActivation;
+      if (activation && typeof activation.hasBeenActive === 'boolean') return activation.hasBeenActive;
+    } catch { /* noop */ }
+    return true;
+  }
   async function playChoice() {
     let ctx, cleanupTimer, closed = false;
     const close = () => {
@@ -6135,7 +6189,7 @@ __mods["choice-alert"] = { fn: function (exp) {
     };
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
+      if (!AudioCtx || !audioUnlocked()) return;
       ctx = new AudioCtx();
       // Also release a context if autoplay/resume stalls or onended never arrives.
       cleanupTimer = setTimeout(close, 4000);
