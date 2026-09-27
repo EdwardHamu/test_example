@@ -2,324 +2,339 @@ TAP version 13
 # Subtest: Material 3 floating surfaces keep static theme, responsive sizing and keyboard focus
 ok 1 - Material 3 floating surfaces keep static theme, responsive sizing and keyboard focus
   ---
-  duration_ms: 3.025085
+  duration_ms: 2.449564
   ...
 # Subtest: HUD groups every diagnostic and action without losing escaped data
 ok 2 - HUD groups every diagnostic and action without losing escaped data
   ---
-  duration_ms: 15.883683
+  duration_ms: 10.908647
   ...
 # Subtest: collapse remains accessible through rerender, drag ignores child controls, actions still dispatch
 ok 3 - collapse remains accessible through rerender, drag ignores child controls, actions still dispatch
   ---
-  duration_ms: 5.821757
+  duration_ms: 3.918915
   ...
 # Subtest: expanded HUD is 734px tall while collapse and small viewports remain usable
 ok 4 - expanded HUD is 734px tall while collapse and small viewports remain usable
   ---
-  duration_ms: 0.586291
+  duration_ms: 0.418621
   ...
 # Subtest: rerender keeps main/log scroll and the same quota card; collapsing and reopening does not jump
 ok 5 - rerender keeps main/log scroll and the same quota card; collapsing and reopening does not jump
   ---
-  duration_ms: 3.684069
+  duration_ms: 2.558615
   ...
 # Subtest: server USD fields retain precision
 ok 6 - server USD fields retain precision
   ---
-  duration_ms: 1.547346
+  duration_ms: 1.46552
   ...
 # Subtest: no credits-to-USD conversion
 ok 7 - no credits-to-USD conversion
   ---
-  duration_ms: 1.680215
+  duration_ms: 1.475022
   ...
 # Subtest: missing snapshot remains unavailable
 ok 8 - missing snapshot remains unavailable
   ---
-  duration_ms: 0.205836
+  duration_ms: 0.142247
   ...
 # Subtest: partial charge rejected
 ok 9 - partial charge rejected
   ---
-  duration_ms: 0.17327
+  duration_ms: 0.151348
   ...
 # Subtest: latest turn without cost does not fall back
 ok 10 - latest turn without cost does not fall back
   ---
-  duration_ms: 0.153553
+  duration_ms: 0.150561
   ...
 # Subtest: newest cost missing amount does not fall back
 ok 11 - newest cost missing amount does not fall back
   ---
-  duration_ms: 0.130303
+  duration_ms: 0.14274
   ...
 # Subtest: zero allowance is not a missing value
 ok 12 - zero allowance is not a missing value
   ---
-  duration_ms: 0.326587
+  duration_ms: 0.200629
   ...
 # Subtest: negative remaining balance supported
 ok 13 - negative remaining balance supported
   ---
-  duration_ms: 0.226295
+  duration_ms: 0.136455
   ...
 # Subtest: nonfinite and string amounts rejected
 ok 14 - nonfinite and string amounts rejected
   ---
-  duration_ms: 0.365171
+  duration_ms: 0.390916
   ...
 # Subtest: partial collection is not a settled balance
 ok 15 - partial collection is not a settled balance
   ---
-  duration_ms: 0.229269
+  duration_ms: 0.226086
   ...
 # Subtest: successful bound auto snapshot
 ok 16 - successful bound auto snapshot
   ---
-  duration_ms: 0.516294
+  duration_ms: 0.427081
   ...
 # Subtest: other page rejected
 ok 17 - other page rejected
   ---
-  duration_ms: 0.31128
+  duration_ms: 0.287467
   ...
 # Subtest: other generation rejected
 ok 18 - other generation rejected
   ---
-  duration_ms: 0.154665
+  duration_ms: 0.161859
   ...
 # Subtest: other run rejected
 ok 19 - other run rejected
   ---
-  duration_ms: 0.180019
+  duration_ms: 0.180036
   ...
 # Subtest: turn baseline rejected
 ok 20 - turn baseline rejected
   ---
-  duration_ms: 0.180124
+  duration_ms: 0.190204
   ...
 # Subtest: new trace turn invalidates old quota
 ok 21 - new trace turn invalidates old quota
   ---
-  duration_ms: 0.254477
+  duration_ms: 0.208591
   ...
 # Subtest: desktop sanitized snapshot supported
 ok 22 - desktop sanitized snapshot supported
   ---
-  duration_ms: 0.256841
+  duration_ms: 0.197762
   ...
 # Subtest: new missing snapshot supersedes old data
 ok 23 - new missing snapshot supersedes old data
   ---
-  duration_ms: 0.393494
+  duration_ms: 0.27096
   ...
 # Subtest: no arbitrary secrets propagated
 ok 24 - no arbitrary secrets propagated
   ---
-  duration_ms: 0.391724
+  duration_ms: 0.250219
   ...
 # Subtest: read time must be valid
 ok 25 - read time must be valid
   ---
-  duration_ms: 0.3031
+  duration_ms: 0.191299
   ...
 # Subtest: network failure is explicitly labelled
 ok 26 - network failure is explicitly labelled
   ---
-  duration_ms: 0.296434
+  duration_ms: 0.167328
   ...
 # Subtest: adapter has no network or storage calls
 ok 27 - adapter has no network or storage calls
   ---
-  duration_ms: 0.300545
+  duration_ms: 0.158217
   ...
 # Subtest: migrated core matches the upstream adapter after newline normalization
 ok 28 - migrated core matches the upstream adapter after newline normalization
   ---
-  duration_ms: 0.321547
+  duration_ms: 0.207473
   ...
 # Subtest: cost parser and sanitizer retain all seven quota fields and reject unrelated payloads
 ok 29 - cost parser and sanitizer retain all seven quota fields and reject unrelated payloads
   ---
-  duration_ms: 4.555446
+  duration_ms: 3.788828
   ...
 # Subtest: quota fields keep zero and signed balances, without accepting string numbers or secret labels
 ok 30 - quota fields keep zero and signed balances, without accepting string numbers or secret labels
   ---
-  duration_ms: 2.634456
+  duration_ms: 2.22668
   ...
 # Subtest: automatic collection exposes USD using only its existing trace and span reads
 ok 31 - automatic collection exposes USD using only its existing trace and span reads
   ---
-  duration_ms: 520.528577
+  duration_ms: 513.949538
   ...
 # Subtest: actual main boot installs the card and exposes sanitized desktop quota snapshots
 ok 32 - actual main boot installs the card and exposes sanitized desktop quota snapshots
   ---
-  duration_ms: 12.37037
+  duration_ms: 5.523379
   ...
 # Subtest: desktop ingress and read API enforce page, run and generation boundaries
 ok 33 - desktop ingress and read API enforce page, run and generation boundaries
   ---
-  duration_ms: 6.025029
+  duration_ms: 2.82832
   ...
 # Subtest: new missing desktop charge supersedes automatic quota from an older turn
 ok 34 - new missing desktop charge supersedes automatic quota from an older turn
   ---
-  duration_ms: 9.934802
+  duration_ms: 3.695776
   ...
 # Subtest: card mounts in current HUD and renders USD amounts, precision and percentage
 ok 35 - card mounts in current HUD and renders USD amounts, precision and percentage
   ---
-  duration_ms: 51.111602
+  duration_ms: 20.187422
   ...
 # Subtest: legacy monitor takes priority by moving the same card without duplication
 ok 36 - legacy monitor takes priority by moving the same card without duplication
   ---
-  duration_ms: 9.290269
+  duration_ms: 3.482913
   ...
 # Subtest: without MutationObserver, late mount and timer recovery still reuse the original card
 ok 37 - without MutationObserver, late mount and timer recovery still reuse the original card
   ---
-  duration_ms: 7.584614
+  duration_ms: 2.945466
   ...
 # Subtest: repeat installation shares one timer and disposal is idempotent
 ok 38 - repeat installation shares one timer and disposal is idempotent
   ---
-  duration_ms: 10.221592
+  duration_ms: 3.298061
   ...
 # Subtest: card retains last valid amounts and tooltips until another complete USD snapshot arrives
 ok 39 - card retains last valid amounts and tooltips until another complete USD snapshot arrives
   ---
-  duration_ms: 20.072951
+  duration_ms: 5.499277
   ...
 # Subtest: without a prior valid snapshot the card remains empty until the first numeric update
 ok 40 - without a prior valid snapshot the card remains empty until the first numeric update
   ---
-  duration_ms: 7.667471
+  duration_ms: 2.351474
   ...
 # Subtest: zero allowance stays zero, negative balance stays signed and the ring is clamped
 ok 41 - zero allowance stays zero, negative balance stays signed and the ring is clamped
   ---
-  duration_ms: 12.273499
+  duration_ms: 3.747727
   ...
 # Subtest: unrepresentable percentage does not display Infinity or NaN
 ok 42 - unrepresentable percentage does not display Infinity or NaN
   ---
-  duration_ms: 7.295102
+  duration_ms: 2.663766
   ...
 # Subtest: stale records and failed collection carry explicit warnings
 ok 43 - stale records and failed collection carry explicit warnings
   ---
-  duration_ms: 7.863932
+  duration_ms: 2.746947
   ...
 # Subtest: a retained snapshot gains the stale warning once at the five-minute boundary
 ok 44 - a retained snapshot gains the stale warning once at the five-minute boundary
   ---
-  duration_ms: 10.414042
+  duration_ms: 4.112362
   ...
 # Subtest: server labels are text, never HTML
 ok 45 - server labels are text, never HTML
   ---
-  duration_ms: 8.153477
+  duration_ms: 2.739733
   ...
 # Subtest: new-chat route and transient adapter failures retain old values; leaving Agent clears them
 ok 46 - new-chat route and transient adapter failures retain old values; leaving Agent clears them
   ---
-  duration_ms: 15.483373
+  duration_ms: 3.219674
   ...
 # Subtest: off-origin and framed pages create no card or timer
 ok 47 - off-origin and framed pages create no card or timer
   ---
-  duration_ms: 10.387313
+  duration_ms: 5.068076
   ...
 # Subtest: new feature registers passively and performs no network, persistence or business action
 ok 48 - new feature registers passively and performs no network, persistence or business action
   ---
-  duration_ms: 11.899992
+  duration_ms: 7.283444
   ...
 # Subtest: identical ready snapshots cause no DOM writes across repeated refreshes
 ok 49 - identical ready snapshots cause no DOM writes across repeated refreshes
   ---
-  duration_ms: 16.378296
+  duration_ms: 11.425195
   ...
 # Subtest: unchanged empty states also cause no repeated DOM writes
 ok 50 - unchanged empty states also cause no repeated DOM writes
   ---
-  duration_ms: 9.698527
+  duration_ms: 6.803849
   ...
 # Subtest: content clobber restores the same populated card before the next interval
 ok 51 - content clobber restores the same populated card before the next interval
   ---
-  duration_ms: 4.242855
+  duration_ms: 4.014942
   ...
 # Subtest: replacing the complete HUD body retains the card and its child nodes
 ok 52 - replacing the complete HUD body retains the card and its child nodes
   ---
-  duration_ms: 4.251422
+  duration_ms: 4.199017
   ...
 # Subtest: one hundred host redraws retain one card with no timer tick or observer loop
 ok 53 - one hundred host redraws retain one card with no timer tick or observer loop
   ---
-  duration_ms: 73.185102
+  duration_ms: 70.188789
   ...
 # Subtest: own text updates do not trigger another render or observer feedback loop
 ok 54 - own text updates do not trigger another render or observer feedback loop
   ---
-  duration_ms: 4.524075
+  duration_ms: 3.116446
   ...
 # Subtest: late host discovery and host replacement update observer bindings without waiting for the timer
 ok 55 - late host discovery and host replacement update observer bindings without waiting for the timer
   ---
-  duration_ms: 6.450131
+  duration_ms: 4.906264
   ...
 # Subtest: observers are disconnected on disposal and queued callbacks cannot resurrect the card
 ok 56 - observers are disconnected on disposal and queued callbacks cannot resurrect the card
   ---
-  duration_ms: 2.67826
+  duration_ms: 2.281667
   ...
 # Subtest: reinjection replaces the previous disposable implementation rather than keeping its flicker
 ok 57 - reinjection replaces the previous disposable implementation rather than keeping its flicker
   ---
-  duration_ms: 2.720499
+  duration_ms: 2.355648
   ...
 # Subtest: stale warning updates only once when the five-minute boundary is crossed
 ok 58 - stale warning updates only once when the five-minute boundary is crossed
   ---
-  duration_ms: 3.548375
+  duration_ms: 3.135222
   ...
 # Subtest: the USD card top-right badge uses the Pulse last-refresh timestamp, not a fabricated reset time
 ok 59 - the USD card top-right badge uses the Pulse last-refresh timestamp, not a fabricated reset time
   ---
-  duration_ms: 4.036288
+  duration_ms: 4.025544
   ...
 # Subtest: Pulse timestamp badge updates independently of USD snapshot availability, and invalid dates are unknown
 ok 60 - Pulse timestamp badge updates independently of USD snapshot availability, and invalid dates are unknown
   ---
-  duration_ms: 7.613367
+  duration_ms: 6.718366
   ...
 # Subtest: USD quota body is split into three equal thirds without content-driven column widths
 ok 61 - USD quota body is split into three equal thirds without content-driven column widths
   ---
-  duration_ms: 4.500882
+  duration_ms: 1.983498
   ...
 # Subtest: long USD text wraps inside its own third instead of pushing other cells
 ok 62 - long USD text wraps inside its own third instead of pushing other cells
   ---
-  duration_ms: 1.101146
+  duration_ms: 0.412222
+  ...
+# Subtest: 280px card keeps label and value on one line when they fit and never splits a label
+ok 63 - 280px card keeps label and value on one line when they fit and never splits a label
+  ---
+  duration_ms: 0.233383
+  ...
+# Subtest: compact typography for a 280px wide card
+ok 64 - compact typography for a 280px wide card
+  ---
+  duration_ms: 0.472025
+  ...
+# Subtest: shortened labels and notices reduce wrapping without losing meaning
+ok 65 - shortened labels and notices reduce wrapping without losing meaning
+  ---
+  duration_ms: 0.251152
   ...
 # Subtest: USD quota card keeps its data fields and ships unchanged in the built userscript
-ok 63 - USD quota card keeps its data fields and ships unchanged in the built userscript
+ok 66 - USD quota card keeps its data fields and ships unchanged in the built userscript
   ---
-  duration_ms: 1.168
+  duration_ms: 0.574165
   ...
-1..63
-# tests 63
+1..66
+# tests 66
 # suites 0
-# pass 63
+# pass 66
 # fail 0
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 1226.288113
+# duration_ms 971.056305

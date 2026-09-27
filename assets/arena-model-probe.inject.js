@@ -7015,9 +7015,9 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
       if(!card){
         card=document.createElement('section');card.className='usd-card';card.setAttribute('aria-label','美元账户额度快照');
         card.innerHTML=`<style>
-  .usd-card{margin:0 0 14px;padding:15px 13px;border:1px solid #5e5272;border-radius:20px;background:#2b2733;color:#e7e0e9;font:12px/1.6 system-ui,"Microsoft YaHei",sans-serif;--quota-color:#a8dbad}
-  .usd-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:14px}.usd-title{font-size:13px;font-weight:700}.usd-tag{font-size:10px;color:#d0bcff;background:#493861;border-radius:20px;padding:3px 9px;text-align:right;white-space:normal;overflow-wrap:anywhere}.usd-body{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;gap:8px}.usd-body>*{min-width:0;max-width:100%}.usd-ring{position:relative;width:64px;height:auto;aspect-ratio:1/1;justify-self:start}.usd-ring svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}.usd-track{stroke:#49454f}.usd-bar{stroke:var(--quota-color);stroke-linecap:round}.usd-percent{position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:15px;color:var(--quota-color)}.usd-caption{font-size:11px;color:#cac4d0}.usd-amount{font-size:18px;line-height:1.3;letter-spacing:-.4px;font-weight:700;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.usd-total{font-size:11px;color:#cac4d0;margin-top:2px;overflow-wrap:anywhere}.usd-details{margin:0}.usd-line{padding:3px 0}.usd-line+.usd-line{border-top:1px solid #49454f}.usd-line dt{font-size:11px;color:#cac4d0}.usd-line dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.usd-warning{grid-column:1/-1;color:#ffcf70;font-size:11px;overflow-wrap:anywhere}.usd-warning:empty{display:none}.usd-card[data-state=empty]{--quota-color:#cac4d0}.usd-card[data-state=low]{--quota-color:#ffb4ab}.usd-card[data-state=warn]{--quota-color:#ffcf70}
-  </style><div class="usd-head"><span class="usd-title">美元账户额度</span><span class="usd-tag" data-usd="pulse-refreshed">精力刷新 —</span></div><div class="usd-body"><div class="usd-ring"><svg viewBox="0 0 88 88" aria-hidden="true"><circle class="usd-track" cx="44" cy="44" r="37" fill="none" stroke-width="6"/><circle data-usd="bar" class="usd-bar" cx="44" cy="44" r="37" fill="none" stroke-width="6" stroke-dasharray="232.478" stroke-dashoffset="232.478"/></svg><span class="usd-percent" data-usd="percent">—</span></div><div class="usd-main"><div class="usd-caption">剩余金额</div><div class="usd-amount" data-usd="remaining">未提供</div><div class="usd-total" data-usd="total">总额度 未提供</div></div><dl class="usd-details"><div class="usd-line"><dt>累计已用</dt><dd data-usd="used">未提供</dd></div><div class="usd-line"><dt>额度档位</dt><dd data-usd="tier">未提供</dd></div></dl><div class="usd-warning" data-usd="warning"></div></div>`;
+  .usd-card{margin:0 0 14px;padding:12px;border:1px solid #5e5272;border-radius:20px;background:#2b2733;color:#e7e0e9;font:11px/1.45 system-ui,"Microsoft YaHei",sans-serif;--quota-color:#a8dbad}
+  .usd-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:10px}.usd-title{font-size:12px;font-weight:700}.usd-tag{font-size:10px;line-height:1.4;color:#d0bcff;background:#493861;border-radius:20px;padding:2px 8px;text-align:right;white-space:normal;overflow-wrap:anywhere}.usd-body{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;gap:6px}.usd-body>*{min-width:0;max-width:100%}.usd-ring{position:relative;width:56px;height:auto;aspect-ratio:1/1;justify-self:start}.usd-ring svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}.usd-track{stroke:#49454f}.usd-bar{stroke:var(--quota-color);stroke-linecap:round}.usd-percent{position:absolute;inset:0;display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--quota-color)}.usd-caption{font-size:10px;color:#cac4d0}.usd-amount{font-size:16px;line-height:1.25;letter-spacing:-.3px;font-weight:700;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.usd-total{font-size:10px;color:#cac4d0;margin-top:1px;overflow-wrap:anywhere}.usd-details{margin:0}.usd-line{padding:2px 0;overflow-wrap:anywhere}.usd-line+.usd-line{border-top:1px solid #49454f}.usd-line dt{display:inline;white-space:nowrap;font-size:10px;color:#cac4d0}.usd-line dd{display:inline;margin:0;font-variant-numeric:tabular-nums}.usd-warning{grid-column:1/-1;color:#ffcf70;font-size:10px;overflow-wrap:anywhere}.usd-warning:empty{display:none}.usd-card[data-state=empty]{--quota-color:#cac4d0}.usd-card[data-state=low]{--quota-color:#ffb4ab}.usd-card[data-state=warn]{--quota-color:#ffcf70}
+  </style><div class="usd-head"><span class="usd-title">美元账户额度</span><span class="usd-tag" data-usd="pulse-refreshed">精力刷新 —</span></div><div class="usd-body"><div class="usd-ring"><svg viewBox="0 0 88 88" aria-hidden="true"><circle class="usd-track" cx="44" cy="44" r="37" fill="none" stroke-width="6"/><circle data-usd="bar" class="usd-bar" cx="44" cy="44" r="37" fill="none" stroke-width="6" stroke-dasharray="232.478" stroke-dashoffset="232.478"/></svg><span class="usd-percent" data-usd="percent">—</span></div><div class="usd-main"><div class="usd-caption">剩余</div><div class="usd-amount" data-usd="remaining">未提供</div><div class="usd-total" data-usd="total">总额 未提供</div></div><dl class="usd-details"><div class="usd-line"><dt>已用</dt> <dd data-usd="used">未提供</dd></div><div class="usd-line"><dt>档位</dt> <dd data-usd="tier">未提供</dd></div></dl><div class="usd-warning" data-usd="warning"></div></div>`;
       }
       owner=content;
       if(card.parentNode!==content)content.prepend(card);
@@ -7046,15 +7046,15 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
     };
     function empty(note){
       lastReady=null;
-      setState('empty');text('percent','—');text('remaining','未提供');text('total','总额度 未提供');
+      setState('empty');text('percent','—');text('remaining','未提供');text('total','总额 未提供');
       for(const id of ['used','tier'])text(id,'未提供');text('warning','');tooltip(null,null,note);
       attr('bar','stroke-dashoffset','232.478');for(const id of ['remaining','used','total'])attr(id,'title',null);
     }
     function retain(note,warning=''){
       if(!lastReady){empty(note);return;}
       const age=Date.now()-Date.parse(lastReady.checkedAt);
-      text('warning',[lastReady.overLimit?'记录标记：账户额度已超限':'',warning,
-        age>300000?'快照已超过 5 分钟，不代表当前实时余额':''].filter(Boolean).join('；'));
+      text('warning',[lastReady.overLimit?'账户额度已超限':'',warning,
+        age>300000?'快照超过 5 分钟，非实时余额':''].filter(Boolean).join('；'));
       tooltip(lastReady.windowStartAtMs,lastReady.checkedAt,
         note+' 当前保留上次获得的额度数值；等待新额度记录，下一次完整记账快照到达后自动更新。');
     }
@@ -7081,11 +7081,11 @@ __mods["usd-quota-panel"] = { fn: function (exp) {
         text('percent',pct===null?'—':pct.toLocaleString('en-US',{maximumFractionDigits:1,useGrouping:false})+'%');
         attr('bar','stroke-dashoffset',String(232.478*(1-Math.min(100,Math.max(0,pct||0))/100)));
         text('remaining',money(q.balanceRemainingUsd));attr('remaining','title',exact(q.balanceRemainingUsd));
-        text('total','总额度 '+money(q.allowanceUsd));attr('total','title',exact(q.allowanceUsd));
+        text('total','总额 '+money(q.allowanceUsd));attr('total','title',exact(q.allowanceUsd));
         text('used',money(q.chargedUserTotalUsd));attr('used','title',exact(q.chargedUserTotalUsd));
         text('tier',[q.allowanceTier,q.allowanceSource].filter(Boolean).join(' · ')||'未提供');
         const age=Date.now()-Date.parse(s.checkedAt);
-        text('warning',[q.overLimit===true?'记录标记：账户额度已超限':'',s.warning||'',age>300000?'快照已超过 5 分钟，不代表当前实时余额':''].filter(Boolean).join('；'));
+        text('warning',[q.overLimit===true?'账户额度已超限':'',s.warning||'',age>300000?'快照超过 5 分钟，非实时余额':''].filter(Boolean).join('；'));
         tooltip(q.windowStartAtMs,s.checkedAt,'来源：本会话第 '+s.turn+' 轮 spend.recorded（服务端记账）。不是现金余额，不从 credits 换算，也不累计多个快照。金额保留两位小数，悬停可看更高精度。');
         lastReady={checkedAt:s.checkedAt,windowStartAtMs:q.windowStartAtMs,overLimit:q.overLimit===true};
       }catch(_){if(card)retain('额度数据暂不可用；原有聊天和模型监测功能不受此卡片控制。');}

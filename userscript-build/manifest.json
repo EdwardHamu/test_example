@@ -8,7 +8,7 @@
     "FollowLatest.js": "016f081562a0eda5f039348459d97f913b882c7f720e728f87306619538f2329",
     "ConversationMarkdown.js": "ad7bb05872be1ebb8dfb0886e512939eec8a849ff5b81307f4bb75417bb14091",
     "ArenaBalance.js": "0fd39805e478899544f98ee6491636377d4ec85d276e749c72da6b8e29a6d799",
-    "arena-model-probe.inject.js": "20393f451708d5ae72dce6e48ffe78a116b625811a12dbd668081105cc48c007"
+    "arena-model-probe.inject.js": "fe034687d4982d7e3864475ca28c7dd5d5d3781e9e0295fdafd0dfd548b72204"
   },
   "modularSources": {
     "userscript/main.js": "39de11cc73764ef110844ac4aab74def4990cec8f65bbc31d27f4828d14f26fe",
@@ -34,8 +34,8 @@
   "taskReviewHider": "8290ee0c1984f09997d38d0b450afc218fd7fb1a6d3b0c093f96c0c79a243b77",
   "composerVisibility": "3a45c983411ea2d08753752eab035fb813b7cc51ab45ace00e52f00ed966d273",
   "composerAutoEsc": "8acfac52597ad67c712c6397d0ada7f0a8b59a717bc00808fe629e726c26dcf0",
-  "outputSha256": "1a89c671972b1e68153a04af7435f2d24984b676d6d6f28eb7d3fe96efab33da",
-  "bytes": 550588,
+  "outputSha256": "1aaf1613ec343d405c817a9cd6d32762716f4aca689299b192e26233d9985a92",
+  "bytes": 550565,
   "transportSha256": "fc68baae09c1a35c7bc1ebaa7b7d7e3ad06ecf71c07f76ac58b62abf2a8ee6b7",
   "transportBytes": 4870
 }

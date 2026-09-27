@@ -194,7 +194,7 @@ const field=(card,id)=>card.querySelector('[data-usd="'+id+'"]');
 test('card mounts in current HUD and renders USD amounts, precision and percentage',()=>{
  const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];assert.ok(card);assert.equal(card.getAttribute('aria-label'),'美元账户额度快照');
  assert.equal(field(card,'remaining').textContent,'$75.12');assert.equal(field(card,'remaining').title,'$75.123456');
- assert.equal(field(card,'total').textContent,'总额度 $100.00');assert.equal(field(card,'used').textContent,'$24.88');
+ assert.equal(field(card,'total').textContent,'总额 $100.00');assert.equal(field(card,'used').textContent,'$24.88');
  assert.equal(field(card,'percent').textContent,'75.1%');assert.equal(card.dataset.state,'good');
  assert.equal(field(card,'tier').textContent,'standard · server');assert.match(card.title,/不是现金余额/);
  assert.match(card.title,/窗口起始：[^\n]+\n记录读取时间：/);
@@ -224,7 +224,7 @@ test('card retains last valid amounts and tooltips until another complete USD sn
  const offset=field(card,'bar').getAttribute('stroke-dashoffset');
  e.setSnapshot({status:'unavailable',quota:null,warning:'最近采集失败，此金额可能滞后'});widget.refresh();
  assert.equal(field(card,'remaining').textContent,'$75.12');assert.equal(field(card,'remaining').title,'$75.123456');
- assert.equal(field(card,'used').textContent,'$24.88');assert.equal(field(card,'total').textContent,'总额度 $100.00');
+ assert.equal(field(card,'used').textContent,'$24.88');assert.equal(field(card,'total').textContent,'总额 $100.00');
  assert.equal(field(card,'percent').textContent,'75.1%');assert.equal(field(card,'tier').textContent,'standard · server');
  assert.ok(card.title.includes(checked));assert.ok(card.title.includes(windowStart));assert.equal(field(card,'bar').getAttribute('stroke-dashoffset'),offset);
  assert.equal(card.dataset.state,'good');assert.doesNotMatch(field(card,'warning').textContent,/等待新额度记录/);
@@ -249,7 +249,7 @@ test('without a prior valid snapshot the card remains empty until the first nume
 test('zero allowance stays zero, negative balance stays signed and the ring is clamped',()=>{
  const e=panelHarness(),widget=e.panel.mount(),card=e.cards()[0];
  e.setSnapshot(snapshot({...VALUES,allowanceUsd:0,balanceRemainingUsd:0,chargedUserTotalUsd:0}));widget.refresh();
- assert.equal(field(card,'remaining').textContent,'$0.00');assert.equal(field(card,'total').textContent,'总额度 $0.00');assert.equal(field(card,'percent').textContent,'—');
+ assert.equal(field(card,'remaining').textContent,'$0.00');assert.equal(field(card,'total').textContent,'总额 $0.00');assert.equal(field(card,'percent').textContent,'—');
  e.setSnapshot(snapshot({...VALUES,allowanceUsd:10,balanceRemainingUsd:-2,overLimit:true}));widget.refresh();
  assert.equal(field(card,'remaining').textContent,'$-2.00');assert.equal(field(card,'percent').textContent,'-20%');assert.equal(card.dataset.state,'low');
  assert.equal(field(card,'bar').getAttribute('stroke-dashoffset'),'232.478');assert.match(field(card,'warning').textContent,/超限/);
